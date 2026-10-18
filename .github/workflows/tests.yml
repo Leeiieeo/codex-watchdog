@@ -11,6 +11,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify npm package and launcher
+        run: npm test
       - run: PYTHONPATH=src python -m unittest discover -s tests -v
       - run: sh -n control.sh run.sh
       - name: Verify installed CLI outside checkout
