@@ -11,10 +11,16 @@
 2. 检查 `git diff --check`、`sh -n control.sh run.sh`、`git status`，确认没有配置和状态文件被暂存。
 3. 提交并推送到 GitHub；GitHub Actions 在 Python 3.10 和 3.13 上运行隔离测试。
 4. 服务器在 `~/project/codex-watchdog` 中执行 `git pull --ff-only`，再次运行测试。
-5. 验证后在 TUI 中按两次 Ctrl+C，或从另一终端执行 `./control.sh stop`，等待软件和 worker 退出，再执行 `./control.sh start`。保留配置和状态，避免把已有故障当成新故障。
-6. 启动命令直接在当前终端打开 TUI；核对 `./control.sh status`、日志和目标列表。需要保持 SSH 断开后的运行时，自行创建 tmux 会话并在其中启动，再使用 tmux detach。
+5. 验证后在 TUI 中按两次 Ctrl+C，或从另一终端执行 `codex-watchdog stop`，等待软件和 worker 退出，再执行 `uv tool install --python 3.12 --reinstall .` 更新安装，最后运行 `codex-watchdog`。保留配置和状态，避免把已有故障当成新故障。
+6. 启动命令直接在当前终端打开 TUI；核对 `codex-watchdog status`、日志和目标列表。需要保持 SSH 断开后的运行时，自行创建 tmux 会话并在其中启动，再使用 tmux detach。
 
 测试使用假的 Unix WebSocket 服务，不调用真实模型。现场验证优先查看状态；不要为了测试打断正常工作的研究会话。界面增删的现场测试应使用隔离配置或既有会话的幂等添加。
+
+## 安装与开发入口
+
+用户安装使用 `uv tool install --python 3.12 .`，命令为 `codex-watchdog`，从任意目录启动均使用同一用户配置。安装后源码改动不会自动生效；升级使用 `--reinstall`。需要开发时即时使用源码修改，可选择 `uv tool install --python 3.12 --editable .`，或直接用 `./control.sh`。可编辑安装的默认配置仍按源码模式选取仓库配置。
+
+CI 除源码测试外还执行实际包安装，并从临时目录验证 console entry point、版本、帮助和指定配置读取。已部署配置应通过 `--config` 或 `CODEX_WATCHDOG_CONFIG` 明确绑定，避免源码配置与用户配置目录切换时丢失监控目标。
 
 ## 模块
 

@@ -2,30 +2,46 @@
 
 在 Linux 服务器上守护 Codex CLI 的 Goal，在明确的模型容量故障后自动重试。正常运行时只读监测。使用 Python 标准库，无第三方运行依赖。
 
-## 启动
+## 安装与启动
+
+在源码目录安装一次（需要 [uv](https://docs.astral.sh/uv/)）：
 
 ```sh
-./control.sh start
+uv tool install --python 3.12 .
+codex-watchdog
 ```
 
-配置不存在时会打开首次配置表单，填写 Codex 目录、Unix socket 路径和状态目录。默认只观察；勾选容量故障自动恢复授权后才会恢复 Goal。也可复制 `config.example.json` 手动配置。`./control.sh init` 单独运行配置表单，已有配置不会被覆盖；`./control.sh doctor` 执行只读诊断。
+`uv` 创建独立 Python 环境并将命令放入用户的可执行目录，不安装到系统 Python。确认安装可执行 `codex-watchdog --version` 和 `codex-watchdog --help`。若提示找不到命令，执行 `uv tool update-shell` 后重新打开终端。
 
-启动后直接在当前终端打开 TUI，同时启动守护服务。要求 Linux、Python 3.10+，以及已经运行的 Codex App Server。TUI 使用标准库 curses，支持 UTF-8 终端。`control.sh` 默认使用 `python3`；可以用 `CODEX_WATCHDOG_PYTHON` 指定解释器。
+也支持 `pipx install .`（Python 3.10+）。源码调试可继续使用 `./control.sh` 或 `PYTHONPATH=src python3 -m codex_watchdog`；这些是开发入口，日常使用安装后的 `codex-watchdog`。
 
-按两次 Ctrl+C 关闭软件：第一次显示提示，5 秒内再按一次，同时关闭 TUI 并停止守护服务。终端关闭或收到终止信号时也会清理服务。配置、恢复记录和日志保存在服务器本机，均被 Git 忽略。可以从另一终端执行 `./control.sh stop` 请求关闭软件；`./control.sh status` 查看状态。
+从源码安装为独立副本，拉取更新后需重装：
+
+```sh
+git pull --ff-only
+uv tool install --python 3.12 --reinstall .
+```
+
+升级前停止正在运行的软件，保留配置和状态，再重装并启动。卸载使用 `uv tool uninstall codex-capacity-watchdog`，配置和运行记录保留。
+
+配置不存在时会打开首次配置表单，填写 Codex 目录、Unix socket 路径和状态目录。默认只观察；勾选容量故障自动恢复授权后才会恢复 Goal。也可复制 `config.example.json` 手动配置。`codex-watchdog init` 单独运行配置表单，已有配置不会被覆盖；`codex-watchdog doctor` 执行只读诊断。
+
+启动后直接在当前终端打开 TUI，同时启动守护服务。要求 Linux、Python 3.10+，以及已经运行的 Codex App Server。TUI 使用标准库 curses，支持 UTF-8 终端。安装后的命令使用独立 Python 环境，无需切换到仓库目录。
+
+按两次 Ctrl+C 关闭软件：第一次显示提示，5 秒内再按一次，同时关闭 TUI 并停止守护服务。终端关闭或收到终止信号时也会清理服务。配置、恢复记录和日志保存在服务器本机，均被 Git 忽略。可以从另一终端执行 `codex-watchdog stop` 请求关闭软件；`codex-watchdog status` 查看状态。
 
 如果需要通过 tmux 保持远程运行，由用户自行创建会话，再在其中启动：
 
 ```sh
 tmux new -s my-watchdog
-./control.sh start
+codex-watchdog
 ```
 
 使用 tmux 的 detach 可以保留软件运行。Watchdog 不创建、切换或管理 tmux 会话，tmux 是可选工具。
 
 ## TUI 管理
 
-`./control.sh`、`./control.sh start`、`./control.sh tui`、`./run.sh` 和安装后的 `codex-watchdog` 都启动同一个软件：当前终端的 TUI 加守护服务。同一个状态目录只允许一个运行实例，重复启动会报错，不会增加 worker。
+`codex-watchdog` 默认直接启动当前终端的 TUI 和守护服务；也可显式执行 `codex-watchdog start` 或 `codex-watchdog tui`。同一个状态目录只允许一个运行实例，重复启动会报错，不会增加 worker。
 
 | 按键 | 操作 |
 | --- | --- |
@@ -57,9 +73,9 @@ tmux new -s my-watchdog
 默认自动选择主题：能读取到浅色终端背景时使用浅色，否则使用深色。按 `T` 可以切换。希望固定主题时，在启动前设置：
 
 ```sh
-CODEX_WATCHDOG_THEME=dark ./control.sh
-CODEX_WATCHDOG_THEME=light ./control.sh
-CODEX_WATCHDOG_THEME=mono ./control.sh
+CODEX_WATCHDOG_THEME=dark codex-watchdog
+CODEX_WATCHDOG_THEME=light codex-watchdog
+CODEX_WATCHDOG_THEME=mono codex-watchdog
 ```
 
 正常为绿色、等待为琥珀色、异常为红色，暂停和次要信息使用灰色，同时保留文字和状态符号。支持 256 色、基础 8 色和无彩色终端；设置 `NO_COLOR` 时使用单色，粗体与反白继续标明重点。主题只影响本软件显示。
@@ -109,14 +125,13 @@ Webhook JSON 包含 `event`、`thread_id`、`at` 和简短 `message`，不会发
 
 `check_interval_seconds` 默认 `300`；`recovery_confirmation_seconds` 默认 `300`；`attention_after_seconds` 默认 `1800`；`stall_after_seconds` 默认 `0`。`state_dir` 保存带版本的恢复基线、去重记录、事件时间线、累计统计和轮转日志，更新代码时应保留。旧版无版本状态自动迁移并保留已尝试轮次；损坏或未知版本会阻止服务启动并保留原文件，通过 doctor 排查或恢复已验证的备份，不能删除去重记录来绕过错误。
 
-已有运行目录可以保留配置和 state，再让新仓库引用原配置：
+已有运行目录可以保留原配置和 state，通过明确的配置路径启动安装后的命令：
 
 ```sh
-git clone git@github.com:Leeiieeo/codex-watchdog.git ~/project/codex-watchdog
-cd ~/project/codex-watchdog
-ln -s ~/scripts/codex-watchdog/config.json config.json
-./control.sh start
+codex-watchdog --config ~/scripts/codex-watchdog/config.json
 ```
+
+也可设置 `CODEX_WATCHDOG_CONFIG`。安装后的默认配置位于用户配置目录，仓库里的旧 `config.json` 不会自动替代它。沿用原配置能保持原 `state_dir` 和恢复去重记录。
 
 迁移已运行实例时先停止旧 worker，保留状态文件，再启动新版本。升级前先测试，使用 `git pull --ff-only`，验证后重启 watchdog worker；Codex 本身继续运行。详细步骤见 [开发和部署](docs/development.md)。
 
