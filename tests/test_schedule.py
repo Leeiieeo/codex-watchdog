@@ -37,14 +37,14 @@ class ScheduleTests(unittest.TestCase):
         with patch('codex_watchdog.schedule.time',clock):
             wait_for_next_check(self.path,self.config,self.status,self.state,self.output,stopped)
 
-    def test_default_waits_300_seconds_and_retry_display_matches_next_check(self):
+    def test_retry_deadline_wakes_before_normal_five_minute_check(self):
         clock = Clock()
         self.run_wait(clock)
-        self.assertEqual(clock.elapsed,300)
+        self.assertEqual(clock.elapsed,60)
         saved = json.loads(self.output.read_text())
-        self.assertEqual(saved['next_check_at'],400)
+        self.assertEqual(saved['next_check_at'],160)
         self.assertEqual(saved['check_interval_seconds'],300)
-        self.assertEqual(saved['targets']['one']['next_retry_at'],400)
+        self.assertEqual(saved['targets']['one']['next_retry_at'],160)
 
     def test_shorter_interval_is_applied_without_restart(self):
         def update(elapsed):
@@ -56,6 +56,7 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual(self.status['next_check_at'],110)
 
     def test_longer_interval_extends_the_current_wait(self):
+        self.state = {}
         set_check_interval(self.path,5)
         self.config = load_config(self.path)
         def update(elapsed):
@@ -63,6 +64,38 @@ class ScheduleTests(unittest.TestCase):
         clock = Clock(update)
         self.run_wait(clock)
         self.assertEqual(clock.elapsed,600)
+
+    def test_no_pending_retry_keeps_normal_interval(self):
+        self.state = {}
+        clock = Clock()
+        self.run_wait(clock)
+        self.assertEqual(clock.elapsed,300)
+
+    def test_retry_after_next_check_is_displayed_at_its_own_deadline(self):
+        self.state['one']['pending']['due'] = 430
+        clock = Clock()
+        self.run_wait(clock)
+        self.assertEqual(clock.elapsed,300)
+        self.assertEqual(self.status['targets']['one']['next_retry_at'],430)
+        self.status['checked_at'] = 400
+        clock = Clock()
+        self.run_wait(clock)
+        self.assertEqual(clock.elapsed,30)
+
+    def test_failed_observation_waits_for_reconnection_without_spinning(self):
+        self.status['targets']['one']['error'] = 'disconnected'
+        self.state['one']['pending']['due'] = 90
+        clock = Clock()
+        self.run_wait(clock)
+        self.assertEqual(clock.elapsed,30)
+        self.assertIsNone(self.status['targets']['one']['next_retry_at'])
+
+    def test_configuration_error_with_overdue_retry_does_not_spin(self):
+        self.status['error']='configuration unavailable'
+        self.state['one']['pending']['due']=90
+        clock=Clock()
+        self.run_wait(clock)
+        self.assertEqual(clock.elapsed,30)
 
     def test_target_change_wakes_daemon_promptly(self):
         def update(elapsed):

@@ -6,6 +6,9 @@ import subprocess
 import sys
 import time
 
+from .events import EventLog
+from .storage import atomic_json, load_state, rotate_file
+
 
 class Service:
     def __init__(self, config_path, config):
@@ -15,6 +18,18 @@ class Service:
         self.lock = None
         self.output = None
         self.retry_at = None
+        self.restarts = 0
+        self.consecutive_failures = 0
+        self.started_at = None
+        self.blocked = False
+        self.events = None
+
+    def _status(self, phase, **data):
+        atomic_json(self.state_dir/'service-status.json', {
+            'pid': os.getpid(), 'host': os.uname().nodename, 'phase': phase,
+            'worker_pid': self.process.pid if self.process else None,
+            'restarts': self.restarts, 'consecutive_failures': self.consecutive_failures,
+            'updated_at': time.time(), **data})
 
     @property
     def stop_requested(self):
@@ -36,36 +51,64 @@ class Service:
                     fcntl.flock(worker_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
                     raise RuntimeError('A watchdog worker is already running; stop it first') from None
+            load_state(self.state_dir/'state.json')
             (self.state_dir/'STOP').unlink(missing_ok=True)
+            self.events = EventLog(self.state_dir)
+            self.lock = lock
             self._launch()
         except BaseException:
-            lock.close()
+            if self.lock is not None:
+                self.stop()
+            else:
+                lock.close()
             raise
         self.lock = lock
 
     def _launch(self):
         source = str(Path(__file__).resolve().parents[1])
         env = {**os.environ, 'PYTHONPATH': source}
-        self.output = (self.state_dir/'service.log').open('w')
+        rotate_file(self.state_dir/'service.log')
+        self.output = (self.state_dir/'service.log').open('a')
+        self.output.write(f'\n[{time.strftime("%Y-%m-%d %H:%M:%S")}] worker start\n')
+        self.output.flush()
         try:
             self.process = subprocess.Popen(
                 [sys.executable, '-m', 'codex_watchdog.watchdog',
-                 '--config', self.config_path], env=env, stdin=subprocess.DEVNULL,
+                 '--config', self.config_path, '--parent-pid', str(os.getpid())], env=env, stdin=subprocess.DEVNULL,
                 stdout=self.output, stderr=self.output, start_new_session=True)
         except BaseException:
             self.output.close()
             self.output = None
             raise
         self.retry_at = None
+        self.started_at = time.monotonic()
+        self._status('starting')
+        if self.events:
+            self.events.record('service_started', restarts=self.restarts)
 
     def poll(self):
         if self.stop_requested or self.process.poll() is None:
             return None
+        if self.blocked:
+            return None
         if self.retry_at is None:
-            self.retry_at = time.monotonic()+10
-            return f'守护服务退出（{self.process.returncode}），10 秒后重启；详情见 service.log'
+            stable = self.started_at is not None and time.monotonic()-self.started_at >= 60
+            self.consecutive_failures = 1 if stable else self.consecutive_failures+1
+            if self.events:
+                self.events.record('service_exited', exit_code=self.process.returncode)
+            if self.consecutive_failures >= 3:
+                self.blocked = True
+                self._status('blocked', reason='守护服务连续启动失败；查看服务日志或运行 doctor')
+                if self.events:
+                    self.events.record('service_blocked', reason='连续三次快速退出')
+                return '守护服务连续启动失败，已停止自动重启；按 D 诊断或查看服务日志'
+            delay = min(10*2**(self.consecutive_failures-1), 60)
+            self.retry_at = time.monotonic()+delay
+            self._status('restarting', retry_at=time.time()+delay)
+            return f'守护服务退出（{self.process.returncode}），{delay} 秒后重启；详情见服务日志'
         if time.monotonic() >= self.retry_at:
             self.output.close()
+            self.restarts += 1
             self._launch()
             return '守护服务已重新启动'
         return None
@@ -88,5 +131,9 @@ class Service:
         finally:
             if self.output is not None:
                 self.output.close()
-            self.lock.close()
-            self.lock = None
+            try:
+                if self.started_at is not None:
+                    self._status('stopped')
+            finally:
+                self.lock.close()
+                self.lock = None

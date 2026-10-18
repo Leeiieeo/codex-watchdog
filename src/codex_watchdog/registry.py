@@ -8,6 +8,7 @@ import uuid
 
 from .rpc import Client, RpcError
 from .storage import atomic_json
+from .patterns import PATTERNS, DEFAULT_MODES
 
 DEFAULT_CHECK_INTERVAL = 300
 
@@ -31,19 +32,54 @@ def minutes_to_seconds(text):
 def load_config(path):
     path = Path(path).expanduser().resolve()
     config = json.loads(path.read_text())
-    if config.get('user_authorized_capacity_resume') is not True:
+    if not isinstance(config, dict) or config.get('schema_version', 1) != 1:
+        raise ValueError('unsupported configuration schema; run doctor')
+    if not isinstance(config.get('observe_only', False), bool):
+        raise ValueError('observe_only must be true or false')
+    if not config.get('observe_only') and config.get('user_authorized_capacity_resume') is not True:
         raise ValueError('explicit capacity-resume authorization missing in config')
     targets = config.get('targets', [])
-    if not isinstance(targets, list) or len({x['thread_id'] for x in targets}) != len(targets):
+    if (not isinstance(targets, list) or not all(isinstance(x, dict) for x in targets)
+            or not all(isinstance(x.get('thread_id'), str) for x in targets)
+            or len({x['thread_id'] for x in targets}) != len(targets)):
         raise ValueError('targets must be explicit and unique')
     for target in targets:
         if not all(isinstance(target.get(k), str) and target[k]
                    for k in ('thread_id', 'cwd', 'label')):
             raise ValueError('each target needs thread_id, cwd and label')
+        if not isinstance(target.get('enabled', True), bool):
+            raise ValueError('target enabled must be true or false')
+    modes = config.get('pattern_modes', {})
+    if not isinstance(modes, dict) or set(modes)-set(DEFAULT_MODES):
+        raise ValueError('unknown failure pattern in pattern_modes')
+    for pattern in PATTERNS:
+        mode = modes.get(pattern.id, DEFAULT_MODES[pattern.id])
+        if mode not in ('recover', 'observe', 'off') or (mode == 'recover' and not pattern.recoverable):
+            raise ValueError('only capacity failures support recover mode')
+    for key, default, minimum in (('stall_after_seconds', 0, 0),
+                                  ('recovery_confirmation_seconds', 300, 1),
+                                  ('attention_after_seconds', 1800, 1)):
+        value = config.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= 604800:
+            raise ValueError(key+' must be an integer within the supported range')
+    notifications = config.get('notifications', {})
+    if not isinstance(notifications, dict):
+        raise ValueError('notifications must be an object')
+    for key in ('enabled', 'terminal_bell'):
+        if not isinstance(notifications.get(key, False), bool):
+            raise ValueError('notification '+key+' must be true or false')
+    env_name = notifications.get('webhook_url_env', 'CODEX_WATCHDOG_WEBHOOK_URL')
+    if not isinstance(env_name, str) or not env_name.isidentifier():
+        raise ValueError('webhook_url_env must name an environment variable')
+    cooldown = notifications.get('cooldown_seconds', 300)
+    if isinstance(cooldown, bool) or not isinstance(cooldown, int) or not 1 <= cooldown <= 86400:
+        raise ValueError('notification cooldown must be 1 to 86400 seconds')
     config['targets'] = targets
     config['check_interval_seconds'] = validate_check_interval(
         config.get('check_interval_seconds',DEFAULT_CHECK_INTERVAL))
     for key in ('codex_home', 'socket_path', 'state_dir'):
+        if not isinstance(config.get(key), str) or not config[key].strip():
+            raise ValueError(key+' must be a nonempty path')
         value = Path(config[key]).expanduser()
         config[key] = str((path.parent/value).resolve())
     return config
@@ -165,3 +201,49 @@ def set_check_interval(config_path, seconds):
         config['check_interval_seconds'] = seconds
         atomic_json(config_path, config)
     return seconds
+
+
+def set_session_enabled(config_path, thread_id, enabled, registration_id=None):
+    if not isinstance(enabled, bool):
+        raise ValueError('enabled must be true or false')
+    config_path = Path(config_path).expanduser().resolve()
+    with config_lock(config_path) as config:
+        target = next((t for t in config['targets'] if t['thread_id'] == thread_id), None)
+        if target is None:
+            raise ValueError('session is no longer managed')
+        if registration_id is not None and target.get('registration_id') != registration_id:
+            raise ValueError('session registration changed; refresh before toggling')
+        if target.get('enabled', True) != enabled:
+            target.update(enabled=enabled, guard_revision=str(uuid.uuid4()))
+            atomic_json(config_path, config)
+    return target
+
+
+def set_pattern_mode(config_path, pattern_id, mode):
+    config_path = Path(config_path).expanduser().resolve()
+    with config_lock(config_path) as config:
+        candidate = next((p for p in PATTERNS if p.id == pattern_id), None)
+        if candidate is None or mode not in ('recover', 'observe', 'off'):
+            raise ValueError('invalid failure pattern or mode')
+        if mode == 'recover' and not candidate.recoverable:
+            raise ValueError('this failure pattern only supports observation')
+        config.setdefault('pattern_modes', {})[pattern_id] = mode
+        config['policy_revision'] = str(uuid.uuid4())
+        atomic_json(config_path, config)
+    return mode
+
+
+def set_options(config_path, *, notifications=None, terminal_bell=None, stall_after_seconds=None):
+    config_path = Path(config_path).expanduser().resolve()
+    with config_lock(config_path) as config:
+        for key, value in (('enabled', notifications), ('terminal_bell', terminal_bell)):
+            if value is not None:
+                if not isinstance(value, bool):
+                    raise ValueError(key+' must be true or false')
+                config.setdefault('notifications', {})[key] = value
+        if stall_after_seconds is not None:
+            if isinstance(stall_after_seconds, bool) or not isinstance(stall_after_seconds, int) or not 0 <= stall_after_seconds <= 604800:
+                raise ValueError('stall threshold must be 0 to 604800 seconds')
+            config['stall_after_seconds'] = stall_after_seconds
+        atomic_json(config_path, config)
+    return config

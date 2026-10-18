@@ -7,6 +7,7 @@
 ## 开发流程
 
 1. 本地修改并运行 `PYTHONPATH=src python3 -m unittest discover -s tests -v`。
+   提交使用 Conventional Commits，例如 `feat(watchdog): explain recovery decisions`、`fix(schedule): honor retry deadlines`。标题描述具体行为；正文记录影响和必要验证，不改写已发布历史。
 2. 检查 `git diff --check`、`sh -n control.sh run.sh`、`git status`，确认没有配置和状态文件被暂存。
 3. 提交并推送到 GitHub；GitHub Actions 在 Python 3.10 和 3.13 上运行隔离测试。
 4. 服务器在 `~/project/codex-watchdog` 中执行 `git pull --ff-only`，再次运行测试。
@@ -19,6 +20,11 @@
 
 - `watchdog.py`：观察、恢复策略、持久去重和复核。
 - `patterns.py`：恢复策略和界面展示共用的失败错误码与提示文本。
+- `decisions.py`：稳定的恢复判定原因与显示文本。
+- `events.py`：有界事件时间线与累计指标。
+- `notifications.py`：默认关闭的冷却通知和异步 Webhook。
+- `diagnostics.py`：只读连接、接口、数据库与状态诊断。
+- `setup.py`：首次配置表单和源码/安装模式的默认配置位置。
 - `rpc.py`：Unix WebSocket JSON-RPC 客户端。
 - `registry.py`：自动发现主会话、锁保护的配置增删。
 - `schedule.py`：默认 5 分钟的检查调度、间隔热更新和配置变更唤醒。
@@ -29,6 +35,8 @@
 - `storage.py`：JSON 原子持久化。
 
 配置修改具有文件锁；更新后守护进程会自行重读。恢复前还会检查目标是否仍在列表且注册版本未变化。TUI 移除同时核对注册版本，避免旧选择误移除一个已经被重新添加的会话。
+
+升级到 0.3.0 时，旧版恢复状态迁移为 schema_version=1，保留 pending 与 attempted。回退至 0.2.x 前应在软件停止后转换状态封装为旧格式；不能直接将新版封装交给旧 worker，更不能删除状态。迁移测试必须覆盖仍在退避的故障与已提交但响应丢失的轮次。
 
 ## 回退
 

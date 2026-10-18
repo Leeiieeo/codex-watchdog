@@ -93,6 +93,7 @@ class ControlTests(ConfigTestCase):
         lock = service.lock
         service.output = Mock()
         service.process = Mock()
+        service.process.pid = 123
         service.process.poll.return_value = None
         service.process.wait.side_effect = [subprocess.TimeoutExpired('worker', 10), 0]
         service.stop()
@@ -108,6 +109,7 @@ class ControlTests(ConfigTestCase):
         service.process = Mock(returncode=1)
         service.process.poll.return_value = 1
         service.output = Mock()
+        service._status = Mock()
         with patch('codex_watchdog.service.time.monotonic', return_value=100), \
                 patch.object(service, '_launch') as launch:
             self.assertIn('10 秒', service.poll())
@@ -198,12 +200,41 @@ class TerminalTests(ConfigTestCase):
 
     def test_current_terminal_start_and_double_ctrl_c_close_both(self):
         self.launch([str(ROOT/'control.sh')])
+        for key, title in ((b'P','监控规则与提醒设置'),(b'?','键盘帮助'),(b'e','事件时间线'),(b'l','守护日志')):
+            self.output.clear()
+            os.write(self.master,key)
+            self.read_until(lambda: title.encode() in self.output)
+            os.write(self.master,b'\x1b')
+            self.read_until(lambda: '受管理的 Codex 会话'.encode() in self.output)
         os.write(self.master, b'q\x03')
         self.read_until(lambda: '5 秒内再按一次 Ctrl+C'.encode() in self.output)
         self.assertIsNone(self.proc.poll())
         os.kill(self.worker_pid, 0)
         self.assertFalse((Path(self.config['state_dir'])/'STOP').exists())
         os.write(self.master, b'\x03')
+        self.assert_closed()
+
+    def test_first_start_saves_setup_and_opens_application(self):
+        self.path.unlink()
+        env={**os.environ,'TERM':'xterm-256color','CODEX_WATCHDOG_CONFIG':str(self.path),
+             'CODEX_WATCHDOG_PYTHON':sys.executable}
+        self.master,slave=pty.openpty()
+        fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',30,130,0,0))
+        try:
+            self.proc=subprocess.Popen([str(ROOT/'control.sh')],cwd=ROOT,env=env,
+                                       stdin=slave,stdout=slave,stderr=slave,
+                                       preexec_fn=controlling_terminal)
+        finally:
+            os.close(slave)
+        self.read_until(lambda:'首次配置'.encode() in self.output)
+        os.write(self.master,b'\n')
+        status_path=self.path.parent/'state/status.json'
+        self.read_until(lambda:status_path.exists())
+        self.worker_pid=json.loads(status_path.read_text())['pid']
+        self.assertTrue(load_config(self.path)['observe_only'])
+        os.write(self.master,b'\x03')
+        self.read_until(lambda:'5 秒内再按一次 Ctrl+C'.encode() in self.output)
+        os.write(self.master,b'\x03')
         self.assert_closed()
 
     def test_run_script_termination_stops_worker(self):

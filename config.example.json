@@ -1,8 +1,26 @@
 {
+  "schema_version": 1,
   "user_authorized_capacity_resume": true,
+  "observe_only": false,
   "codex_home": "~/.codex",
   "socket_path": "~/.codex/app-server-control/app-server-control.sock",
   "state_dir": "./state",
   "check_interval_seconds": 300,
+  "recovery_confirmation_seconds": 300,
+  "attention_after_seconds": 1800,
+  "stall_after_seconds": 0,
+  "pattern_modes": {
+    "capacity": "recover",
+    "connection": "observe",
+    "quota": "observe",
+    "authentication": "observe",
+    "server_error": "observe"
+  },
+  "notifications": {
+    "enabled": false,
+    "terminal_bell": false,
+    "cooldown_seconds": 300,
+    "webhook_url_env": "CODEX_WATCHDOG_WEBHOOK_URL"
+  },
   "targets": []
 }

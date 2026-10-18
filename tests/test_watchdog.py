@@ -18,6 +18,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from codex_watchdog.rpc import Client, RpcError
+from codex_watchdog.storage import load_state
 from codex_watchdog.watchdog import (atomic_json, attempt, capacity, evaluate, fingerprint,
                       goal_record, snapshot, configure, load_config)
 
@@ -502,7 +503,7 @@ class IntegrationTests(unittest.TestCase):
                 self.assertEqual(proc.returncode, 0, err.decode())
                 writes = [m for m in server.calls if m["method"] == "thread/goal/set"]
                 self.assertEqual(len(writes), 1)
-                saved = json.loads((state_dir/"state.json").read_text())["thread-1"]
+                saved = load_state(state_dir/'state.json')['thread-1']
                 self.assertEqual(saved["attempted"], ["t1"])
             finally:
                 if proc.poll() is None:

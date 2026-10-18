@@ -9,8 +9,9 @@ import signal
 import subprocess
 import sys
 
-from .registry import add_session, discover_sessions, load_config, remove_session
+from .registry import add_session, discover_sessions, load_config, remove_session, set_session_enabled
 from .service import Service
+from .setup import default_config, initialize
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -51,14 +52,26 @@ def run_application(config_path, config):
 
 def main():
     parser = argparse.ArgumentParser(description='Codex Watchdog controls')
-    parser.add_argument('--config', default=os.environ.get(
-        'CODEX_WATCHDOG_CONFIG', str(ROOT/'config.json')))
+    parser.add_argument('--config', default=default_config())
     parser.add_argument('action', nargs='?', default='start', choices=(
-        'tui', 'start', 'stop', 'status', 'discover', 'add', 'remove', 'check', 'logs'))
+        'tui', 'start', 'stop', 'status', 'discover', 'add', 'remove', 'check', 'logs',
+        'doctor', 'init', 'pause', 'resume', 'events'))
     parser.add_argument('values', nargs='*')
     args = parser.parse_args()
     path = Path(args.config).expanduser().resolve()
     try:
+        if args.action == 'doctor':
+            from .diagnostics import doctor
+            result = doctor(path)
+            for row in result['checks']:
+                print(f"[{row['level']}] {row['name']}: {row['message']}")
+            if not result['ok']:
+                parser.exit(1)
+            return
+        if args.action == 'init' or (args.action in ('start', 'tui') and not path.exists()):
+            saved = initialize(path)
+            if args.action == 'init' or not saved:
+                return
         config = load_config(path)
         state_dir = Path(config['state_dir'])
         if args.action in ('start', 'tui'):
@@ -89,6 +102,15 @@ def main():
         elif args.action == 'logs':
             from .view import log_lines
             print('\n'.join(log_lines(config)))
+        elif args.action in ('pause', 'resume'):
+            if len(args.values) != 1:
+                parser.error(args.action+' THREAD_ID')
+            set_session_enabled(path, args.values[0], args.action == 'resume')
+            print('Guarding '+('resumed with a new observation baseline.' if args.action == 'resume' else 'paused.'))
+        elif args.action == 'events':
+            from .events import read_events
+            for event in read_events(config['state_dir'], args.values[0] if args.values else None):
+                print(json.dumps(event, ensure_ascii=False))
     except (OSError, ValueError, subprocess.CalledProcessError, RuntimeError, curses.error) as exc:
         parser.exit(1, f'{exc}\n')
 
