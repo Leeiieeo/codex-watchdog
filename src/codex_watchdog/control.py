@@ -12,6 +12,7 @@ import sys
 from .registry import add_session, discover_sessions, load_config, remove_session, set_session_enabled
 from .service import Service
 from .setup import default_config, initialize
+from . import __version__
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -51,7 +52,9 @@ def run_application(config_path, config):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Codex Watchdog controls')
+    parser = argparse.ArgumentParser(prog='codex-watchdog',
+                                     description='Monitor Codex Goals with a terminal dashboard')
+    parser.add_argument('--version', action='version', version='%(prog)s '+__version__)
     parser.add_argument('--config', default=default_config())
     parser.add_argument('action', nargs='?', default='start', choices=(
         'tui', 'start', 'stop', 'status', 'discover', 'add', 'remove', 'check', 'logs',
