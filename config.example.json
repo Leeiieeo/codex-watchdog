@@ -1,0 +1,7 @@
+{
+  "user_authorized_capacity_resume": true,
+  "codex_home": "~/.codex",
+  "socket_path": "~/.codex/app-server-control/app-server-control.sock",
+  "state_dir": "./state",
+  "targets": []
+}
