@@ -8,6 +8,7 @@ from codex_watchdog.renderer import Renderer
 from codex_watchdog.tui import App
 from codex_watchdog.view import cells
 from codex_watchdog.theme import Palette, resolve_theme
+from codex_watchdog.setup import Setup
 
 
 class Buffer:
@@ -149,3 +150,19 @@ class ThemeTests(unittest.TestCase):
             palette.initialize(Mock())
         self.assertEqual(palette.attr('selection'),curses.A_REVERSE)
         self.assertEqual(palette.attr('danger'),curses.A_BOLD)
+
+
+class SetupPresentationTests(unittest.TestCase):
+    def test_configuration_fields_and_authorization_fit_both_terminal_sizes(self):
+        app=Setup('/tmp/watchdog-config.json')
+        app.values[0]='/very/long/路径/'*20
+        for height,width in ((18,70),(30,130)):
+            for selected in range(4):
+                app.index=selected
+                screen=Buffer(height,width)
+                app.draw(screen)
+                self.assertIn('首次配置',screen.text)
+                self.assertIn('容量故障自动恢复',screen.text)
+                self.assertIn('Enter',screen.text)
+                if selected<3:
+                    self.assertIn('▏',screen.text)

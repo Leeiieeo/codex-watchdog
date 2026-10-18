@@ -6,7 +6,9 @@ import signal
 import time
 
 from .storage import atomic_json
-from .view import fit
+from .view import cells
+from .presentation import Canvas
+from .theme import Palette
 
 
 def default_config():
@@ -30,6 +32,7 @@ class Setup:
         self.quit = False
         self.confirm_until = 0
         self.error = ''
+        self.palette = Palette()
 
     def interrupt(self):
         now = time.monotonic()
@@ -38,28 +41,72 @@ class Setup:
         else:
             self.confirm_until = now+5
 
+    def draw(self, screen):
+        c = Canvas(screen, self.palette)
+        screen.erase()
+        h,w = screen.getmaxyx()
+        c.text(0,2,'CODEX WATCHDOG',role='heading',bold=True)
+        c.text(0,19,'/ 首次配置',role='muted')
+        if h < 18 or w < 70:
+            c.paragraph(3,2,'请将终端调整到至少 70 列、18 行。',max(1,w-4),role='warning')
+            c.paragraph(6,2,'5 秒内再按 Ctrl+C 取消' if time.monotonic()<self.confirm_until else
+                        '按两次 Ctrl+C 取消配置',max(1,w-4),role='warning')
+            screen.refresh()
+            return
+        panel_width = min(88,w-6)
+        x = (w-panel_width)//2
+        roomy = h >= 26
+        y = max(2,(h-(23 if roomy else 15))//2)
+        c.text(y,x,'连接你的 Codex',panel_width,role='heading',bold=True)
+        c.text(y+1,x,'设置本机路径，选择容量故障的处理方式。',panel_width,'muted')
+        top = y+3
+        height = 15 if roomy else 9
+        c.box(top,x,height,panel_width,'运行配置')
+        labels = ('Codex 目录','Unix socket','状态目录')
+        for n,label in enumerate(labels):
+            row = top+1+n*(3 if roomy else 2)
+            selected = self.index==n
+            value = self.values[n]
+            if roomy:
+                c.text(row,x+3,label,panel_width-6,'accent' if selected else 'muted',bold=selected)
+                row += 1
+                available = panel_width-6
+            else:
+                c.text(row,x+3,label,13,'accent' if selected else 'muted',bold=selected)
+                available = panel_width-20
+            value_x = x+3 if roomy else x+17
+            if selected:
+                while cells(value)+1>available and value:
+                    value=value[1:]
+                value += '▏'
+            c.text(row,value_x,value,available,'text',fill=True,selected=selected)
+        row = top+(11 if roomy else 7)
+        selected = self.index==3
+        c.text(row,x+3,('☑' if self.authorized else '☐')+' 容量故障自动恢复',panel_width-6,
+               'success' if self.authorized else 'muted',bold=True,selected=selected)
+        if roomy:
+            c.text(row+1,x+5,'已授权恢复原 Goal' if self.authorized else '默认仅观察，可在此按空格授权',panel_width-8,'muted')
+        path_row = top+height+1
+        if path_row<h-3:
+            c.text(path_row,x,'保存至 '+str(self.path),panel_width,'muted')
+        if self.error:
+            c.text(h-4,3,'! '+self.error,w-6,'danger')
+        c.line(h-3,2,w-4)
+        c.keys(h-2,3,[('Tab / ↑↓','选择'),('空格','授权开关'),('Enter','保存'),('Ctrl+U','清空')],w-6)
+        c.text(h-1,3,'5 秒内再按 Ctrl+C 取消' if time.monotonic()<self.confirm_until else
+               'Ctrl+C × 2 取消配置',w-6,'warning' if time.monotonic()<self.confirm_until else 'muted')
+        screen.refresh()
+
     def run(self, screen):
+        self.palette.initialize(screen)
+        try:
+            curses.curs_set(0)
+        except curses.error:
+            pass
         screen.keypad(True)
         screen.timeout(150)
         while not self.quit:
-            screen.erase()
-            height, width = screen.getmaxyx()
-            lines = ['CODEX WATCHDOG / 首次配置', '配置文件：'+str(self.path), '',
-                     'Codex 目录：'+self.values[0], 'Socket 路径：'+self.values[1],
-                     '状态目录：'+self.values[2],
-                     '自动恢复容量故障：'+('已授权' if self.authorized else '未授权，仅观察'), '',
-                     '↑↓/Tab 选择，路径可直接编辑，空格切换自动恢复授权',
-                     'Enter 保存并继续；未授权时只记录，不自动恢复',
-                     '5 秒内再按 Ctrl+C 取消' if time.monotonic() < self.confirm_until else
-                     '按两次 Ctrl+C 取消配置', self.error]
-            for y, line in enumerate(lines):
-                if y < height-1:
-                    attr = curses.A_REVERSE if y == self.index+3 else 0
-                    try:
-                        screen.addstr(y, 0, fit(line, max(0, width-1)), attr)
-                    except curses.error:
-                        pass
-            screen.refresh()
+            self.draw(screen)
             try:
                 key = screen.get_wch()
             except curses.error:
