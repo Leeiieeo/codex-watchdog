@@ -85,18 +85,48 @@ class TuiTests(unittest.TestCase):
         self.assertEqual(app.task.call_args.args[0],'remove')
         self.assertEqual(app.task.call_args.args[-2:],('one','v1'))
 
-    def test_quit_and_browsing_never_edit_config_or_call_codex(self):
+    def test_browsing_and_q_never_exit_or_edit_config_or_call_codex(self):
         before = self.path.read_bytes()
         with patch('codex_watchdog.registry.Client',side_effect=AssertionError('unexpected RPC')):
             app = self.app()
             app.key('\n')
             app.key('q')
+            self.assertEqual(app.mode,'detail')
+            app.key('\x1b')
             app.key('l')
             app.key('q')
+            self.assertEqual(app.mode,'logs')
+            app.key('\x1b')
             app.key('q')
-        self.assertTrue(app.quit)
+            app.key('\x1b')
+        self.assertFalse(app.quit)
         self.assertEqual(self.path.read_bytes(),before)
         self.assertFalse((self.root/'state/STOP').exists())
+
+    def test_ctrl_c_twice_exits_from_every_screen_and_dialog(self):
+        for mode in ('main','add','detail','logs','filter','interval','confirm'):
+            with self.subTest(mode=mode):
+                app = self.app()
+                app.mode = mode if mode in ('main','add','detail','logs') else 'main'
+                app.editing_filter = mode == 'filter'
+                app.interval_input = '' if mode == 'interval' else None
+                app.confirm = dict(self.target) if mode == 'confirm' else None
+                app.key('\x03')
+                self.assertFalse(app.quit)
+                self.assertGreater(app.exit_confirmation_until,time.monotonic())
+                app.key('\x03')
+                self.assertTrue(app.quit)
+
+    def test_ctrl_c_confirmation_expires_after_five_seconds(self):
+        app = self.app()
+        with patch('codex_watchdog.tui.time.monotonic',return_value=100):
+            app.interrupt()
+        with patch('codex_watchdog.tui.time.monotonic',return_value=106):
+            app.interrupt()
+        self.assertFalse(app.quit)
+        with patch('codex_watchdog.tui.time.monotonic',return_value=107):
+            app.interrupt()
+        self.assertTrue(app.quit)
 
     def test_filter_and_unicode_clipping_work_for_chinese_titles(self):
         self.assertEqual(len(filter_rows([{'title':'论文分析','label':'A'}],'论文')),1)

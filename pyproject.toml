@@ -11,7 +11,7 @@ readme = "README.md"
 dependencies = []
 
 [project.scripts]
-codex-watchdog = "codex_watchdog.tui:main"
+codex-watchdog = "codex_watchdog.control:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

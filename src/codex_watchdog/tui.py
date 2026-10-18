@@ -1,9 +1,5 @@
 """Keyboard manager: browse status and explicitly edit enrollment or interval."""
-import argparse
 import curses
-import locale
-import os
-from pathlib import Path
 import queue
 import threading
 import time
@@ -21,8 +17,10 @@ PHASE = {'baseline':'建立基线', 'running':'正常工作', 'healthy':'正常'
 
 
 class App:
-    def __init__(self, config_path):
+    def __init__(self, config_path, service=None):
         self.config_path = config_path
+        self.service = service
+        self.exit_confirmation_until = 0
         self.mode = 'main'
         self.query = ''
         self.editing_filter = False
@@ -105,10 +103,20 @@ class App:
     def selected(self):
         return self.rows[self.index] if self.rows else None
 
+    def interrupt(self):
+        now = time.monotonic()
+        if 0 < self.exit_confirmation_until and now < self.exit_confirmation_until:
+            self.quit = True
+        else:
+            self.exit_confirmation_until = now+5
+
     def key(self, key):
+        if key == '\x03':
+            self.interrupt()
+            return
         if key == curses.KEY_RESIZE: return
         if self.interval_input is not None:
-            if key in ('\x1b','q'):
+            if key == '\x1b':
                 self.interval_input = None
             elif key in ('\n','\r',curses.KEY_ENTER):
                 if not self.interval_input:
@@ -134,7 +142,7 @@ class App:
             if key in ('y','Y'):
                 row, self.confirm = self.confirm, None
                 self.task('remove', remove_session, self.config_path, row['thread_id'], row.get('registration_id'))
-            elif key in ('n','N','q','\x1b','\n','\r'): self.confirm = None
+            elif key in ('n','N','\x1b','\n','\r'): self.confirm = None
             return
         if self.editing_filter:
             if key in ('\n','\r',curses.KEY_ENTER): self.editing_filter = False
@@ -143,10 +151,9 @@ class App:
             elif isinstance(key,str) and key.isprintable() and len(self.query) < 100: self.query += key
             self.index, self.focus = 0, None
             return
-        if key in ('q','\x1b'):
+        if key == '\x1b':
             if self.mode != 'main':
                 self.mode, self.query, self.detail = 'main', '', None
-            else: self.quit = True
         elif key in (curses.KEY_DOWN,'j',curses.KEY_UP,'k',curses.KEY_NPAGE,curses.KEY_PPAGE):
             step = (1 if key in (curses.KEY_DOWN,'j') else -1 if key in (curses.KEY_UP,'k')
                     else 8 if key == curses.KEY_NPAGE else -8)
@@ -183,7 +190,9 @@ class App:
         h,w = screen.getmaxyx()
         self.text(screen,0,1,'CODEX WATCHDOG',curses.A_BOLD | curses.color_pair(1))
         if h < 18 or w < 70:
-            self.text(screen,3,1,'请将终端调整到至少 70 列、18 行；q 退出界面')
+            self.text(screen,3,1,'请将终端调整到至少 70 列、18 行；按两次 Ctrl+C 关闭软件')
+            if time.monotonic() < self.exit_confirmation_until:
+                self.text(screen,5,1,'5 秒内再按一次 Ctrl+C，关闭界面和守护服务',curses.A_BOLD)
             screen.refresh()
             return
         health = self.data['health'] if self.data else 'unknown'
@@ -238,10 +247,12 @@ class App:
         elif self.message_until > time.time(): self.text(screen,h-3,1,self.message,curses.color_pair(2))
         helptext = ('Enter 保存  Esc 取消  留空回车保留当前设置' if self.interval_input is not None else
                     '↑↓/jk 选择  Enter 添加  / 搜索  r 重新发现  Esc 返回' if self.mode=='add' else
-                    'Esc 返回  q 返回' if self.mode in ('detail','logs') else
-                    '↑↓ 选择  a 添加  d 移除  i 间隔  Enter 详情  l 日志  / 搜索  q 退出')
+                    'Esc 返回' if self.mode in ('detail','logs') else
+                    '↑↓ 选择  a 添加  d 移除  i 间隔  Enter 详情  l 日志  / 搜索')
         self.text(screen,h-2,1,helptext,curses.A_BOLD)
-        self.text(screen,h-1,1,'界面退出后，守护进程继续运行。')
+        self.text(screen,h-1,1,
+                  '5 秒内再按一次 Ctrl+C，关闭界面和守护服务' if time.monotonic() < self.exit_confirmation_until
+                  else '按两次 Ctrl+C 关闭软件，同时停止界面和守护服务。')
         screen.refresh()
 
     def draw_details(self, screen):
@@ -280,6 +291,13 @@ class App:
         screen.timeout(150)
         self.refresh()
         while not self.quit:
+            if self.service:
+                if self.service.stop_requested:
+                    self.quit = True
+                    break
+                message = self.service.poll()
+                if message:
+                    self.toast(message)
             self.poll()
             if time.monotonic()-self.last_refresh >= 1: self.refresh()
             self.draw(screen)
@@ -287,17 +305,9 @@ class App:
             except curses.error: pass
 
 
-def default_config():
-    return os.environ.get('CODEX_WATCHDOG_CONFIG', str(Path.cwd()/'config.json'))
-
-
 def main():
-    parser = argparse.ArgumentParser(description='Codex Watchdog terminal manager')
-    parser.add_argument('--config',default=default_config())
-    args = parser.parse_args()
-    locale.setlocale(locale.LC_ALL,'')
-    try: curses.wrapper(App(str(Path(args.config).expanduser().resolve())).run)
-    except KeyboardInterrupt: pass
+    from .control import main as control_main
+    control_main()
 
 
 if __name__ == '__main__': main()

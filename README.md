@@ -8,16 +8,24 @@
 cp config.example.json config.json
 # 根据服务器填写 socket_path；默认路径需要当前 Codex 实例支持。
 ./control.sh start
-tmux attach -t codex-watchdog
 ```
 
-要求 Linux、Python 3.10+、tmux，以及已经运行的 Codex App Server。TUI 使用标准库 curses，支持 UTF-8 终端。`control.sh` 默认使用 `python3`；可以用 `CODEX_WATCHDOG_PYTHON` 指定解释器。
+启动后直接在当前终端打开 TUI，同时启动守护服务。要求 Linux、Python 3.10+，以及已经运行的 Codex App Server。TUI 使用标准库 curses，支持 UTF-8 终端。`control.sh` 默认使用 `python3`；可以用 `CODEX_WATCHDOG_PYTHON` 指定解释器。
 
-配置、恢复记录和日志保存在服务器本机，均被 Git 忽略。`./control.sh stop` 停止守护；`./control.sh status` 查看状态。
+按两次 Ctrl+C 关闭软件：第一次显示提示，5 秒内再按一次，同时关闭 TUI 并停止守护服务。终端关闭或收到终止信号时也会清理服务。配置、恢复记录和日志保存在服务器本机，均被 Git 忽略。可以从另一终端执行 `./control.sh stop` 请求关闭软件；`./control.sh status` 查看状态。
+
+如果需要通过 tmux 保持远程运行，由用户自行创建会话，再在其中启动：
+
+```sh
+tmux new -s my-watchdog
+./control.sh start
+```
+
+使用 tmux 的 detach 可以保留软件运行。Watchdog 不创建、切换或管理 tmux 会话，tmux 是可选工具。
 
 ## TUI 管理
 
-`./control.sh tui`（或不带参数执行 `./control.sh`）打开管理界面。`start` 会在独立 tmux 会话中启动守护，并打开管理窗口。
+`./control.sh`、`./control.sh start`、`./control.sh tui`、`./run.sh` 和安装后的 `codex-watchdog` 都启动同一个软件：当前终端的 TUI 加守护服务。同一个状态目录只允许一个运行实例，重复启动会报错，不会增加 worker。
 
 | 按键 | 操作 |
 | --- | --- |
@@ -30,7 +38,7 @@ tmux attach -t codex-watchdog
 | l | 查看最近的守护日志 |
 | r | 刷新；添加列表中重新发现会话 |
 | Esc | 返回上一级 |
-| q | 返回或退出界面；守护继续运行 |
+| Ctrl+C，Ctrl+C | 第一次提示；5 秒内第二次关闭 TUI 和守护服务 |
 
 主界面显示项目、运行状态、Goal、守护状态、已重试次数和下次重试倒计时，并标明状态是否过期。顶部显示检查间隔和下次检查倒计时。回车可查看项目路径、完整会话信息和该会话的守护日志。支持终端缩放和中文会话标题。
 
@@ -46,7 +54,7 @@ tmux attach -t codex-watchdog
 
 退避间隔为 60、120、240、300 秒，附加 0–10% 随机延迟。实际重试发生在退避结束后的下一次检查，界面显示这个实际计划时间。每个失败轮次最多提交一次恢复；结果不明确时不会盲目重复提交。人工暂停、完成、预算耗尽、非容量错误、读取不一致都会阻止恢复。兼容 Codex 0.162.1 的 `systemError + blocked` 容量失败；不满足时间关联条件的一般阻塞不会恢复。
 
-浏览界面不连接 Codex，只读取本地状态文件。只有显式发现/添加时调用只读接口；移除不需要连接 Codex。关闭界面不会停止守护。守护当前通过 tmux 运行，服务器重启后需要重新 start。
+界面刷新只读取本地状态文件。显式发现/添加时调用只读接口；移除不需要连接 Codex。守护服务随软件启动和退出，异常退出后由前台软件等待 10 秒重启。服务器重启后需要重新 start。
 
 ## 配置与部署
 
