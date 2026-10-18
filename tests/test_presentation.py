@@ -9,6 +9,7 @@ from codex_watchdog.tui import App
 from codex_watchdog.view import cells
 from codex_watchdog.theme import Palette, resolve_theme
 from codex_watchdog.setup import Setup
+from codex_watchdog.presentation import readable_wrap
 
 
 class Buffer:
@@ -116,6 +117,20 @@ class PresentationTests(unittest.TestCase):
         self.assertIn('等待重试',screen.text)
         self.assertIn('守护已暂停',screen.text)
         self.assertTrue(any(attr & curses.A_REVERSE for row in screen.attributes for attr in row))
+
+    def test_selected_rule_remains_visible_after_wrapping_and_resize(self):
+        self.app.mode='patterns'
+        for height,width in ((18,70),(30,130),(18,70)):
+            for index,name in enumerate(('模型容量不足','模型请求连接失败','配额或速率限制','认证失败','服务内部错误')):
+                self.app.index=index
+                self.assertIn('› '+name,self.render(height,width).text)
+
+    def test_english_failure_messages_wrap_at_word_boundaries(self):
+        text='Selected model is at capacity. Please try a different model.'
+        lines=readable_wrap(text,39)
+        self.assertEqual(' '.join(lines),text)
+        self.assertTrue(all(cells(line)<=39 for line in lines))
+        self.assertNotEqual(lines[0][-1],'t')
 
     def test_attention_card_handles_real_error_messages(self):
         self.rows[0].update(error='daemon disconnected',phase='suspended')

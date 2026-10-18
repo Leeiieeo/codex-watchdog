@@ -4,7 +4,7 @@ import time
 
 from .events import EVENT_NAMES, read_events
 from .patterns import PATTERNS, CAPACITY_MESSAGE, pattern_mode
-from .presentation import Canvas, HEALTH, RUNTIME, GOAL, phase_text, severity
+from .presentation import Canvas, HEALTH, RUNTIME, GOAL, phase_text, severity, readable_wrap
 from .view import activity_text, cells, interval_text, log_lines, retry_text, wrap_text
 
 PAGE_TITLES = {'main':'会话总览', 'add':'添加会话', 'detail':'会话详情', 'events':'事件时间线',
@@ -182,7 +182,7 @@ class Renderer:
                  ((row.get('last_failure') or {}).get('message') or '暂无失败记录', 'muted', False),
                  ('', 'text', False), ('Enter 查看详情', 'accent', False)]
         for text, role, bold in items:
-            lines = wrap_text(text, width)
+            lines = readable_wrap(text, width)
             for line in lines[:2]:
                 if y > bottom:
                     return
@@ -269,8 +269,15 @@ class Renderer:
         c.box(top,2,bottom-top+1,self.w-4,title)
         content = []
         for text, role in self.content():
-            content.extend((line,role) for line in wrap_text(text,self.w-10))
+            content.extend((line,role) for line in readable_wrap(text,self.w-10))
         available = max(1,bottom-top-2)
+        if app.mode == 'patterns':
+            focus = (app.index,self.h,self.w)
+            if getattr(app,'pattern_render_focus',None) != focus:
+                selected = next((index for index,(_,role) in enumerate(content) if role=='selection'),0)
+                if selected < app.scroll or selected >= app.scroll+available:
+                    app.scroll = selected
+                app.pattern_render_focus = focus
         app.scroll = min(app.scroll,max(0,len(content)-available))
         for offset,(line,role) in enumerate(content[app.scroll:app.scroll+available]):
             c.text(top+2+offset,5,line,self.w-10,role,bold=role in ('heading','selection'),selected=role=='selection')

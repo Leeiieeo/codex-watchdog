@@ -3,6 +3,21 @@ import curses
 
 from .view import cells, fit, wrap_text
 
+
+def readable_wrap(value, width):
+    """Prefer English word boundaries while allowing Chinese and long paths."""
+    raw = ''.join(c if c.isprintable() else ' ' for c in str(value))
+    lines = []
+    while cells(raw) > max(1,width):
+        prefix = wrap_text(raw,width)[0]
+        end = len(prefix)
+        whitespace = prefix.rfind(' ')
+        if whitespace >= len(prefix)//2:
+            end = whitespace
+        lines.append(raw[:end].rstrip())
+        raw = raw[end:].lstrip()
+    return lines+[raw]
+
 PHASE = {'baseline':'建立基线', 'running':'正常工作', 'healthy':'正常', 'watching':'监测中',
          'paused':'已暂停', 'backoff':'等待重试', 'goal_stopped':'目标已停止',
          'unavailable':'暂不可恢复', 'suspended':'读取异常', 'resume_accepted':'已请求恢复',
@@ -86,7 +101,7 @@ class Canvas:
         self.text(y,x+filled,'─'*(width-filled),width-filled,'border')
 
     def paragraph(self, y, x, value, width, max_lines=2, role='text'):
-        lines = wrap_text(value, width)
+        lines = readable_wrap(value, width)
         for n, line in enumerate(lines[:max_lines]):
             self.text(y+n, x, line, width, role)
         return min(len(lines), max_lines)

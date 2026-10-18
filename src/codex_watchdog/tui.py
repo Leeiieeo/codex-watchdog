@@ -214,7 +214,6 @@ class App:
                 return
             if key in (curses.KEY_DOWN, 'j', curses.KEY_UP, 'k'):
                 self.index = max(0, min(len(PATTERNS)-1, self.index+(1 if key in (curses.KEY_DOWN, 'j') else -1)))
-                self.scroll = self.index*3
                 return
         elif self.mode in ('detail', 'logs', 'events', 'doctor', 'help'):
             if key in (curses.KEY_DOWN, 'j', curses.KEY_UP, 'k', curses.KEY_NPAGE, curses.KEY_PPAGE):
