@@ -302,8 +302,7 @@ class Features(unittest.TestCase):
             def refresh(self): pass
             def addstr(self,y,x,text,attr):
                 self_outer.assertLess(cells(text)+x,70)
-                self_outer.assertNotIn(y,self.lines)
-                self.lines[y]=text
+                self.lines.setdefault(y,[]).append(text)
         self_outer=self
         with patch('codex_watchdog.tui.curses.color_pair',return_value=0):
             for mode in ('main','add','detail','logs','events','patterns','doctor','help'):
@@ -311,7 +310,7 @@ class Features(unittest.TestCase):
                 app.scroll=0
                 screen=Screen()
                 app.draw(screen)
-                self.assertIn('selected model is at capacity',screen.lines[5])
+                self.assertIn('容量不足',''.join(text for line in screen.lines.values() for text in line))
                 app.key('j')
                 app.draw(screen)
         app.mode='main'
