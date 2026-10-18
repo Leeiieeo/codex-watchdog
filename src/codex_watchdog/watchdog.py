@@ -17,6 +17,7 @@ import time
 from .rpc import Client
 from .storage import atomic_json
 from .registry import load_config, add_session, remove_session, discover_sessions
+from .schedule import wait_for_next_check
 
 LOG = logging.getLogger("codex-watchdog")
 TERMINAL = {"complete", "usage_limited", "budget_limited"}
@@ -349,9 +350,8 @@ def main():
                 break
             status["checked_at"] = time.time()
             atomic_json(state_dir / (prefix + "status.json"), status)
-            deadline = time.monotonic() + 5
-            while not stopped() and time.monotonic() < deadline:
-                time.sleep(0.2)
+            wait_for_next_check(args.config,config,status,state,
+                                state_dir / (prefix + "status.json"),stopped)
     finally:
         if client:
             client.close()

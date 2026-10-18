@@ -37,11 +37,19 @@ class TuiTests(unittest.TestCase):
         return app
 
     def test_stale_heartbeat_never_appears_healthy(self):
+        self.config['check_interval_seconds'] = 5
+        self.path.write_text(json.dumps(self.config))
         self.status()
         self.assertEqual(dashboard(self.path,110)['health'],'running')
         self.assertEqual(dashboard(self.path,130)['health'],'stale')
         (self.root/'state/STOP').touch()
         self.assertEqual(dashboard(self.path,110)['health'],'stopped')
+
+    def test_five_minute_wait_is_healthy_until_next_check_plus_grace(self):
+        self.status()
+        self.assertEqual(dashboard(self.path,399)['health'],'running')
+        self.assertEqual(dashboard(self.path,421)['health'],'stale')
+        self.assertEqual(dashboard(self.path,110)['next_check_at'],400)
 
     def test_corrupt_status_still_lists_offline_targets_for_removal(self):
         (self.root/'state/status.json').write_text('{')
@@ -106,3 +114,26 @@ class TuiTests(unittest.TestCase):
         app.task = Mock()
         app.key('r')
         self.assertEqual(app.task.call_args.args[0],'discover')
+
+    def test_interval_can_be_entered_in_minutes_from_the_main_screen(self):
+        app = self.app()
+        app.task = Mock()
+        app.key('i')
+        for char in '10': app.key(char)
+        app.key('\n')
+        self.assertEqual(app.task.call_args.args[0],'interval')
+        self.assertEqual(app.task.call_args.args[-1],600)
+        self.assertIsNone(app.interval_input)
+
+    def test_invalid_or_cancelled_interval_does_not_change_settings(self):
+        before = self.path.read_bytes()
+        app = self.app()
+        app.task = Mock()
+        app.key('i')
+        app.key('0')
+        app.key('\n')
+        self.assertIsNotNone(app.interval_error)
+        app.task.assert_not_called()
+        app.key('\x1b')
+        self.assertIsNone(app.interval_input)
+        self.assertEqual(self.path.read_bytes(),before)

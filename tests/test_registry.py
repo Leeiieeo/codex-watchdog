@@ -6,7 +6,8 @@ import threading
 import unittest
 from unittest.mock import Mock, patch
 
-from codex_watchdog.registry import add_session, discover_sessions, load_config, remove_session
+from codex_watchdog.registry import (add_session, discover_sessions, load_config, remove_session,
+                                     set_check_interval, minutes_to_seconds)
 from codex_watchdog.rpc import RpcError
 
 
@@ -141,3 +142,25 @@ class RegistryTests(unittest.TestCase):
         remove_session(link, 'one')
         self.assertTrue(link.is_symlink())
         self.assertEqual(load_config(self.path)['targets'], [])
+
+    def test_default_interval_is_five_minutes_and_setting_preserves_targets(self):
+        self.assertEqual(load_config(self.path)['check_interval_seconds'],300)
+        with patch('codex_watchdog.registry.Client',return_value=self.client()):
+            target = add_session(self.path,'one')
+        with patch('codex_watchdog.registry.Client',side_effect=AssertionError('unexpected RPC')):
+            self.assertEqual(set_check_interval(self.path,600),600)
+        config = load_config(self.path)
+        self.assertEqual(config['targets'],[target])
+        self.assertEqual(config['check_interval_seconds'],600)
+
+    def test_invalid_intervals_cannot_be_saved(self):
+        before = self.path.read_bytes()
+        for value in (0,-1,True,1.5,86401,'300',None):
+            with self.subTest(value=value),self.assertRaises(ValueError):
+                set_check_interval(self.path,value)
+        self.assertEqual(self.path.read_bytes(),before)
+        self.assertEqual(minutes_to_seconds('5'),300)
+        self.assertEqual(minutes_to_seconds('0.5'),30)
+        for value in ('','NaN','inf','-5','0','1441','abc'):
+            with self.subTest(value=value),self.assertRaises(ValueError):
+                minutes_to_seconds(value)

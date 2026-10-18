@@ -1,5 +1,6 @@
 """Read-only Codex discovery and serialized edits to the watchdog allowlist."""
 from contextlib import contextmanager
+from decimal import Decimal, DecimalException, ROUND_HALF_UP
 import fcntl
 import json
 from pathlib import Path
@@ -7,6 +8,24 @@ import uuid
 
 from .rpc import Client, RpcError
 from .storage import atomic_json
+
+DEFAULT_CHECK_INTERVAL = 300
+
+
+def validate_check_interval(seconds):
+    if isinstance(seconds,bool) or not isinstance(seconds,int) or not 1 <= seconds <= 86400:
+        raise ValueError('check interval must be an integer between 1 and 86400 seconds')
+    return seconds
+
+
+def minutes_to_seconds(text):
+    try:
+        minutes = Decimal(text)
+        if not minutes.is_finite() or not Decimal(1)/60 <= minutes <= 1440:
+            raise ValueError('请输入 1 秒至 1440 分钟之间的时间')
+        return validate_check_interval(int((minutes*60).to_integral_value(rounding=ROUND_HALF_UP)))
+    except (DecimalException,TypeError) as exc:
+        raise ValueError('请输入分钟数，例如 5 或 0.5') from exc
 
 
 def load_config(path):
@@ -22,6 +41,8 @@ def load_config(path):
                    for k in ('thread_id', 'cwd', 'label')):
             raise ValueError('each target needs thread_id, cwd and label')
     config['targets'] = targets
+    config['check_interval_seconds'] = validate_check_interval(
+        config.get('check_interval_seconds',DEFAULT_CHECK_INTERVAL))
     for key in ('codex_home', 'socket_path', 'state_dir'):
         value = Path(config[key]).expanduser()
         config[key] = str((path.parent/value).resolve())
@@ -135,3 +156,12 @@ def remove_session(config_path, thread_id, registration_id=None):
         config['targets'] = [t for t in config['targets'] if t['thread_id'] != thread_id]
         atomic_json(config_path, config)
     return True
+
+
+def set_check_interval(config_path, seconds):
+    seconds = validate_check_interval(seconds)
+    config_path = Path(config_path).expanduser().resolve()
+    with config_lock(config_path) as config:
+        config['check_interval_seconds'] = seconds
+        atomic_json(config_path, config)
+    return seconds

@@ -31,11 +31,11 @@ def command(config_path, module, *args):
                       '--config',str(config_path),*args])
 
 
-def show_tui(config_path):
+def show_tui(config_path,replace=False):
     current = windows().get('status')
     target = command(config_path,'codex_watchdog.tui')
     if current and current[1] == '0':
-        if current[2] == 'watch':
+        if replace or current[2] == 'watch':
             tmux('respawn-pane','-k','-t',current[0],target)
     else:
         tmux('new-window','-d','-t',SESSION+':','-n','status','-c',str(ROOT),target)
@@ -90,7 +90,7 @@ def main():
                 tmux('new-window','-d','-t',SESSION+':','-n','worker','-c',str(ROOT),target)
             else:
                 tmux('new-session','-d','-s',SESSION,'-n','worker','-c',str(ROOT),target)
-            show_tui(path)
+            show_tui(path,replace=True)
             print('Started watchdog and TUI on this server.')
         elif args.action == 'stop':
             state_dir.mkdir(parents=True,exist_ok=True,mode=0o700)

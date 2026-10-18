@@ -489,6 +489,7 @@ class IntegrationTests(unittest.TestCase):
             server = FakeServer(tmp+"/s", handler)
             config = {"user_authorized_capacity_resume": True, "codex_home": tmp,
                       "socket_path": tmp+"/s", "state_dir": str(state_dir),
+                      "check_interval_seconds": 1,
                       "targets": [{"thread_id": "thread-1", "cwd": "/project", "label": "Fixture"}]}
             atomic_json(Path(tmp)/"config.json", config)
             proc = subprocess.Popen([sys.executable, "-m", "codex_watchdog.watchdog",

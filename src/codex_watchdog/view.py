@@ -40,6 +40,12 @@ def activity_text(timestamp):
         return '-'
 
 
+def interval_text(seconds):
+    if seconds % 60 == 0: return f'{seconds//60} 分钟'
+    if seconds < 60: return f'{seconds} 秒'
+    return f'{seconds//60} 分 {seconds%60} 秒'
+
+
 def dashboard(config_path, now=None):
     now = time.time() if now is None else now
     config = load_config(config_path)
@@ -54,6 +60,8 @@ def dashboard(config_path, now=None):
         status = {}
     checked = status.get('checked_at')
     age = max(0, now-checked) if isinstance(checked, (int,float)) else None
+    interval = config['check_interval_seconds']
+    next_check = checked+interval if isinstance(checked,(int,float)) else None
     alive = False
     try:
         if status.get('host') == os.uname().nodename and int(status.get('pid', 0)) > 0:
@@ -62,7 +70,7 @@ def dashboard(config_path, now=None):
     except (OSError, ValueError, TypeError):
         pass
     health = ('stopped' if (state_dir/'STOP').exists() or not alive else
-              'stale' if age is None or age > 20 else
+              'stale' if next_check is None or now > next_check+20 else
               'error' if error or status.get('error') else 'running')
     rows = []
     for target in config['targets']:
@@ -76,7 +84,8 @@ def dashboard(config_path, now=None):
         row.setdefault('attempts', 0)
         rows.append(row)
     return {'config': config, 'rows': rows, 'health': health, 'age': age,
-            'pid': status.get('pid'), 'error': error or status.get('error')}
+            'pid': status.get('pid'), 'error': error or status.get('error'),
+            'check_interval_seconds':interval,'next_check_at':next_check}
 
 
 def filter_rows(rows, query):

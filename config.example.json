@@ -3,5 +3,6 @@
   "codex_home": "~/.codex",
   "socket_path": "~/.codex/app-server-control/app-server-control.sock",
   "state_dir": "./state",
+  "check_interval_seconds": 300,
   "targets": []
 }

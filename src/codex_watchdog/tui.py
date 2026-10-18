@@ -1,4 +1,4 @@
-"""Keyboard-driven manager. Reads status; only explicit add/remove edits config."""
+"""Keyboard manager: browse status and explicitly edit enrollment or interval."""
 import argparse
 import curses
 import locale
@@ -8,8 +8,9 @@ import queue
 import threading
 import time
 
-from .registry import add_session, discover_sessions, remove_session
-from .view import activity_text, dashboard, filter_rows, fit, log_lines, retry_text
+from .registry import (add_session, discover_sessions, remove_session,
+                       set_check_interval, minutes_to_seconds)
+from .view import activity_text, dashboard, filter_rows, fit, interval_text, log_lines, retry_text
 
 PHASE = {'baseline':'建立基线', 'running':'正常工作', 'healthy':'正常', 'watching':'监测中',
          'paused':'已暂停', 'backoff':'等待重试', 'goal_stopped':'目标已停止',
@@ -30,6 +31,8 @@ class App:
         self.candidates = []
         self.discovery_done = False
         self.confirm = None
+        self.interval_input = None
+        self.interval_error = None
         self.detail = None
         self.busy = None
         self.results = queue.Queue()
@@ -81,6 +84,8 @@ class App:
         elif kind == 'remove':
             self.toast('已移除守护，下一轮检查生效')
             self.focus = None
+        elif kind == 'interval':
+            self.toast('检查间隔已保存为 '+interval_text(value)+'，无需重启')
         self.refresh()
 
     def choose_rows(self):
@@ -102,6 +107,29 @@ class App:
 
     def key(self, key):
         if key == curses.KEY_RESIZE: return
+        if self.interval_input is not None:
+            if key in ('\x1b','q'):
+                self.interval_input = None
+            elif key in ('\n','\r',curses.KEY_ENTER):
+                if not self.interval_input:
+                    self.interval_input = None
+                    return
+                try:
+                    seconds = minutes_to_seconds(self.interval_input)
+                except ValueError as exc:
+                    self.interval_error = str(exc)
+                    return
+                self.interval_input = None
+                self.task('interval',set_check_interval,self.config_path,seconds)
+            elif key in (curses.KEY_BACKSPACE,'\x7f','\b'):
+                self.interval_input = self.interval_input[:-1]
+                self.interval_error = None
+            elif key == '\x15':
+                self.interval_input = ''
+            elif isinstance(key,str) and key in '0123456789.' and len(self.interval_input)<20:
+                self.interval_input += key
+                self.interval_error = None
+            return
         if self.confirm:
             if key in ('y','Y'):
                 row, self.confirm = self.confirm, None
@@ -134,6 +162,8 @@ class App:
             if self.mode == 'add': self.task('discover', discover_sessions, self.config_path)
         elif key == 'd' and self.mode == 'main' and self.selected() and not self.busy:
             self.confirm = dict(self.selected())
+        elif key == 'i' and self.mode == 'main' and not self.busy:
+            self.interval_input, self.interval_error = '',None
         elif key in ('\n','\r',curses.KEY_ENTER):
             row = self.selected()
             if row and self.mode == 'add':
@@ -161,6 +191,9 @@ class App:
         self.text(screen,1,1,f"守护: {health}    最近检查: {int(age) if age is not None else '-'} 秒前    管理 {len(self.data['rows']) if self.data else 0} 个会话")
         error = self.view_error or (self.data or {}).get('error')
         if error: self.text(screen,2,1,'状态异常: '+error,curses.color_pair(3))
+        elif self.data:
+            self.text(screen,2,1,'检查间隔: '+interval_text(self.data['check_interval_seconds'])
+                      +'    下次检查: '+retry_text(self.data['next_check_at'],time.time())+'    i 修改间隔')
         if self.mode in ('detail','logs'):
             self.draw_details(screen)
         else:
@@ -193,15 +226,20 @@ class App:
                          '没有可添加的主会话；会话可能已全部受管理。按 r 刷新' if self.mode=='add' and self.discovery_done else
                          '未找到会话。按 r 重试' if self.mode=='add' else '暂无匹配会话；按 a 自动发现并添加')
                 self.text(screen,8,1,empty)
-        if self.confirm:
+        if self.interval_input is not None:
+            current = interval_text(self.data['check_interval_seconds']) if self.data else '-'
+            self.text(screen,h-4,1,'设置检查间隔（分钟），当前 '+current+': '+self.interval_input+'▏',curses.A_REVERSE)
+            self.text(screen,h-3,1,self.interval_error or '例如 5 = 5分钟，0.5 = 30秒；范围 1秒～24小时')
+        elif self.confirm:
             self.text(screen,h-4,1,'移除守护: '+self.confirm['label']+'  '+self.confirm['cwd'],curses.A_REVERSE)
             self.text(screen,h-3,1,'y 确认移除 / n 取消；移除只修改守护列表',curses.A_BOLD)
         elif self.busy:
             self.text(screen,h-3,1,'正在处理 '+self.busy+' …（界面继续响应）',curses.color_pair(2))
         elif self.message_until > time.time(): self.text(screen,h-3,1,self.message,curses.color_pair(2))
-        helptext = ('↑↓/jk 选择  Enter 添加  / 搜索  r 重新发现  Esc 返回' if self.mode=='add' else
+        helptext = ('Enter 保存  Esc 取消  留空回车保留当前设置' if self.interval_input is not None else
+                    '↑↓/jk 选择  Enter 添加  / 搜索  r 重新发现  Esc 返回' if self.mode=='add' else
                     'Esc 返回  q 返回' if self.mode in ('detail','logs') else
-                    '↑↓/jk 选择  a 添加  d 移除  Enter 详情  l 日志  / 搜索  r 刷新  q 退出')
+                    '↑↓ 选择  a 添加  d 移除  i 间隔  Enter 详情  l 日志  / 搜索  q 退出')
         self.text(screen,h-2,1,helptext,curses.A_BOLD)
         self.text(screen,h-1,1,'界面退出后，守护进程继续运行。')
         screen.refresh()

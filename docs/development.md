@@ -20,6 +20,7 @@
 - `watchdog.py`：观察、恢复策略、持久去重和复核。
 - `rpc.py`：Unix WebSocket JSON-RPC 客户端。
 - `registry.py`：自动发现主会话、锁保护的配置增删。
+- `schedule.py`：默认 5 分钟的检查调度、间隔热更新和配置变更唤醒。
 - `view.py`：只读状态、过期检测、日志和终端文本格式。
 - `tui.py`：键盘管理界面，后台执行发现和配置操作。
 - `control.py`：命令行和 tmux 生命周期；TUI 与 worker 是独立进程。
