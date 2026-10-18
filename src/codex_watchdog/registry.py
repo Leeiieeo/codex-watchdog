@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import uuid
 
-from .rpc import Client
+from .rpc import Client, RpcError
 from .storage import atomic_json
 
 
@@ -61,6 +61,19 @@ def discover_sessions(config_path):
                     raise ValueError('thread identity mismatch')
                 if not is_main_thread(thread) or thread.get('status', {}).get('type') == 'notLoaded':
                     continue
+                if not thread.get('name'):
+                    # The daemon also lists empty draft threads belonging to
+                    # open clients. They cannot be inspected or guarded yet.
+                    try:
+                        turns = client.request('thread/turns/list', {
+                            'threadId': tid, 'limit': 1, 'sortDirection': 'desc',
+                            'itemsView': 'notLoaded'})['data']
+                    except RpcError as exc:
+                        if 'not materialized yet' in str(exc):
+                            continue
+                        raise
+                    if not turns:
+                        continue
                 row = thread_entry(thread)
                 row['managed'] = tid in managed
                 sessions.append(row)
@@ -68,7 +81,9 @@ def discover_sessions(config_path):
                 warnings.append(f'{tid}: {exc}')
     finally:
         client.close()
-    return {'sessions': sorted(sessions, key=lambda t: (t['label'].lower(), t['title'], t['thread_id'])),
+    return {'sessions': sorted(sessions, key=lambda t: (
+                t['runtime'] != 'active', t['label'].lower(), -(t.get('updated_at') or 0),
+                t['title'], t['thread_id'])),
             'warnings': warnings}
 
 

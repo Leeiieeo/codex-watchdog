@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from codex_watchdog.registry import add_session, discover_sessions, load_config, remove_session
+from codex_watchdog.rpc import RpcError
 
 
 class RegistryTests(unittest.TestCase):
@@ -59,6 +60,24 @@ class RegistryTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 add_session(self.path, 'one')
         self.assertEqual(load_config(self.path)['targets'], [])
+
+    def test_empty_drafts_are_hidden_but_unnamed_real_sessions_remain(self):
+        c = Mock()
+        def request(method, params):
+            if method == 'thread/loaded/list': return {'data': ['draft','empty','real']}
+            if method == 'thread/read':
+                return {'thread': {'id':params['threadId'],'cwd':'/project/one',
+                                  'name':None,'status':{'type':'idle'},'source':'cli'}}
+            if method == 'thread/turns/list':
+                if params['threadId'] == 'draft':
+                    raise RpcError('thread is not materialized yet')
+                return {'data':[] if params['threadId']=='empty' else [{'id':'turn-one'}]}
+            raise AssertionError('unexpected RPC')
+        c.request.side_effect = request
+        with patch('codex_watchdog.registry.Client',return_value=c):
+            result = discover_sessions(self.path)
+        self.assertEqual([t['thread_id'] for t in result['sessions']],['real'])
+        self.assertEqual(result['warnings'],[])
 
     def test_concurrent_additions_are_not_lost(self):
         barrier = threading.Barrier(2)

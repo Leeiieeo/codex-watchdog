@@ -9,7 +9,7 @@ import threading
 import time
 
 from .registry import add_session, discover_sessions, remove_session
-from .view import dashboard, filter_rows, fit, log_lines, retry_text
+from .view import activity_text, dashboard, filter_rows, fit, log_lines, retry_text
 
 PHASE = {'baseline':'建立基线', 'running':'正常工作', 'healthy':'正常', 'watching':'监测中',
          'paused':'已暂停', 'backoff':'等待重试', 'goal_stopped':'目标已停止',
@@ -171,20 +171,23 @@ class App:
             wide = w >= 105
             header = (fit('项目 / 会话',24)+fit('运行',13)+fit('Goal',12)+fit('守护状态',22)+fit('重试',7)+'下次重试'
                       if wide else fit('项目 / 会话',23)+fit('运行',13)+fit('Goal',11)+'守护状态')
-            if self.mode == 'add': header = fit('项目',24)+fit('运行',13)+'会话标题'
+            if self.mode == 'add': header = fit('项目',24)+fit('运行',13)+fit('最近活动',14)+'会话标题'
             self.text(screen,6,1,header,curses.A_BOLD)
             count = max(1,h-12)
             start = max(0,self.index-count+1)
             for n,row in enumerate(self.rows[start:start+count],start):
                 if self.mode == 'add':
-                    line = fit(row['label'],24)+fit(row.get('runtime','-'),13)+row.get('title','')
+                    line = (fit(row['label'],24)+fit(row.get('runtime','-'),13)
+                            +fit(activity_text(row.get('updated_at')),14)+row.get('title',''))
                 else:
                     line = fit(row['label'],24 if wide else 23)+fit(row.get('runtime','-'),13)+fit(row.get('goal_status','-'),12 if wide else 11)
                     phase = PHASE.get(row.get('phase'),row.get('phase','-'))
                     line += fit(phase,22)+fit(row.get('attempts',0),7)+retry_text(row.get('next_retry_at'),time.time()) if wide else phase
                 self.text(screen,7+n-start,1,line,curses.A_REVERSE if n==self.index else 0)
             row = self.selected()
-            if row: self.text(screen,h-5,1,row.get('title') or row['cwd'])
+            if row:
+                self.text(screen,h-5,1,row.get('title') or row['cwd'])
+                self.text(screen,h-4,1,row['cwd'])
             if not self.rows:
                 empty = ('正在发现会话…' if self.busy=='discover' else
                          '没有可添加的主会话；会话可能已全部受管理。按 r 刷新' if self.mode=='add' and self.discovery_done else

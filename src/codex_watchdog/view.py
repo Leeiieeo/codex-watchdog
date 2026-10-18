@@ -1,5 +1,6 @@
 """Read-only dashboard data and terminal-safe formatting."""
 from collections import deque
+from datetime import datetime
 import json
 import math
 import os
@@ -30,6 +31,13 @@ def retry_text(due, now):
     if due is None: return '-'
     seconds = max(0, math.ceil(due-now))
     return f'{seconds//60:02d}:{seconds%60:02d}'
+
+
+def activity_text(timestamp):
+    try:
+        return datetime.fromtimestamp(timestamp).strftime('%m-%d %H:%M') if timestamp else '-'
+    except (ValueError,TypeError,OSError,OverflowError):
+        return '-'
 
 
 def dashboard(config_path, now=None):
