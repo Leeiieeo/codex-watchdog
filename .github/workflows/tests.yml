@@ -13,3 +13,31 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: PYTHONPATH=src python -m unittest discover -s tests -v
       - run: sh -n control.sh run.sh
+      - name: Verify installed CLI outside checkout
+        run: |
+          python -m pip install .
+          cd "$(mktemp -d)"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          from codex_watchdog import __version__
+          from codex_watchdog.setup import default_config
+
+          env = dict(os.environ)
+          env.pop('PYTHONPATH', None)
+          assert subprocess.check_output(['codex-watchdog', '--version'], env=env, text=True).strip() == 'codex-watchdog '+__version__
+          assert 'usage: codex-watchdog' in subprocess.check_output(['codex-watchdog', '--help'], env=env, text=True)
+          expected = Path(os.environ.get('XDG_CONFIG_HOME', '~/.config')).expanduser()/'codex-watchdog/config.json'
+          assert default_config() == str(expected)
+          with tempfile.TemporaryDirectory() as directory:
+              root = Path(directory)
+              config = {'observe_only': True, 'codex_home': directory, 'socket_path': str(root/'socket'),
+                        'state_dir': str(root/'state'), 'targets': []}
+              path = root/'config.json'
+              path.write_text(json.dumps(config))
+              output = subprocess.check_output(['codex-watchdog', '--config', str(path), 'status'], env=env, text=True)
+              assert 'Watchdog: stopped' in output
+          PY
