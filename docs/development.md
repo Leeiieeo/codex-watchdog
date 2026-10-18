@@ -18,6 +18,7 @@
 ## 模块
 
 - `watchdog.py`：观察、恢复策略、持久去重和复核。
+- `patterns.py`：恢复策略和界面展示共用的失败错误码与提示文本。
 - `rpc.py`：Unix WebSocket JSON-RPC 客户端。
 - `registry.py`：自动发现主会话、锁保护的配置增删。
 - `schedule.py`：默认 5 分钟的检查调度、间隔热更新和配置变更唤醒。

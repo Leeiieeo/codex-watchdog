@@ -18,18 +18,18 @@ from .rpc import Client
 from .storage import atomic_json
 from .registry import load_config, add_session, remove_session, discover_sessions
 from .schedule import wait_for_next_check
+from .patterns import CAPACITY_ERROR_CODE, CAPACITY_MESSAGE
 
 LOG = logging.getLogger("codex-watchdog")
 TERMINAL = {"complete", "usage_limited", "budget_limited"}
 STATUS_MAP = {"usageLimited": "usage_limited", "budgetLimited": "budget_limited"}
-CAPACITY_MESSAGE = "selected model is at capacity. please try a different model."
 
 
 def capacity(error):
     if not isinstance(error, dict):
         return False
     code = error.get("codexErrorInfo")
-    return code == "serverOverloaded" or (
+    return code == CAPACITY_ERROR_CODE or (
         code in (None, "other")
         and str(error.get("message", "")).strip().lower() == CAPACITY_MESSAGE
     )

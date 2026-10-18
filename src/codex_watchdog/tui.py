@@ -7,6 +7,7 @@ import time
 from .registry import (add_session, discover_sessions, remove_session,
                        set_check_interval, minutes_to_seconds)
 from .view import activity_text, dashboard, filter_rows, fit, interval_text, log_lines, retry_text
+from .patterns import CAPACITY_ERROR_CODE, CAPACITY_MESSAGE
 
 PHASE = {'baseline':'建立基线', 'running':'正常工作', 'healthy':'正常', 'watching':'监测中',
          'paused':'已暂停', 'backoff':'等待重试', 'goal_stopped':'目标已停止',
@@ -203,19 +204,21 @@ class App:
         elif self.data:
             self.text(screen,2,1,'检查间隔: '+interval_text(self.data['check_interval_seconds'])
                       +'    下次检查: '+retry_text(self.data['next_check_at'],time.time())+'    i 修改间隔')
+        self.text(screen,3,1,'监控失败 pattern: 模型容量不足 / '+CAPACITY_ERROR_CODE,curses.A_BOLD)
+        self.text(screen,4,1,'  '+CAPACITY_MESSAGE)
         if self.mode in ('detail','logs'):
             self.draw_details(screen)
         else:
             self.rows = self.choose_rows()
             title = '添加守护 / 当前服务中的主会话' if self.mode == 'add' else '受管理的 Codex 会话'
-            self.text(screen,3,1,title,curses.A_BOLD)
-            self.text(screen,4,1,'筛选: '+self.query+('▏' if self.editing_filter else '')+'    (/ 搜索)')
+            self.text(screen,5,1,title,curses.A_BOLD)
+            self.text(screen,6,1,'筛选: '+self.query+('▏' if self.editing_filter else '')+'    (/ 搜索)')
             wide = w >= 105
             header = (fit('项目 / 会话',24)+fit('运行',13)+fit('Goal',12)+fit('守护状态',22)+fit('重试',7)+'下次重试'
                       if wide else fit('项目 / 会话',23)+fit('运行',13)+fit('Goal',11)+'守护状态')
             if self.mode == 'add': header = fit('项目',24)+fit('运行',13)+fit('最近活动',14)+'会话标题'
-            self.text(screen,6,1,header,curses.A_BOLD)
-            count = max(1,h-12)
+            self.text(screen,8,1,header,curses.A_BOLD)
+            count = max(1,h-14)
             start = max(0,self.index-count+1)
             for n,row in enumerate(self.rows[start:start+count],start):
                 if self.mode == 'add':
@@ -225,7 +228,7 @@ class App:
                     line = fit(row['label'],24 if wide else 23)+fit(row.get('runtime','-'),13)+fit(row.get('goal_status','-'),12 if wide else 11)
                     phase = PHASE.get(row.get('phase'),row.get('phase','-'))
                     line += fit(phase,22)+fit(row.get('attempts',0),7)+retry_text(row.get('next_retry_at'),time.time()) if wide else phase
-                self.text(screen,7+n-start,1,line,curses.A_REVERSE if n==self.index else 0)
+                self.text(screen,9+n-start,1,line,curses.A_REVERSE if n==self.index else 0)
             row = self.selected()
             if row:
                 self.text(screen,h-5,1,row.get('title') or row['cwd'])
@@ -234,7 +237,7 @@ class App:
                 empty = ('正在发现会话…' if self.busy=='discover' else
                          '没有可添加的主会话；会话可能已全部受管理。按 r 刷新' if self.mode=='add' and self.discovery_done else
                          '未找到会话。按 r 重试' if self.mode=='add' else '暂无匹配会话；按 a 自动发现并添加')
-                self.text(screen,8,1,empty)
+                self.text(screen,10,1,empty)
         if self.interval_input is not None:
             current = interval_text(self.data['check_interval_seconds']) if self.data else '-'
             self.text(screen,h-4,1,'设置检查间隔（分钟），当前 '+current+': '+self.interval_input+'▏',curses.A_REVERSE)
@@ -258,7 +261,7 @@ class App:
     def draw_details(self, screen):
         h,w = screen.getmaxyx()
         row = next((r for r in (self.data or {}).get('rows',[]) if r['thread_id']==self.detail),None)
-        y = 3
+        y = 5
         if self.mode == 'detail' and row:
             fields = [('会话',row['label']),('标题',row.get('title','-')),('目录',row['cwd']),
                       ('Thread',row['thread_id']),('运行 / Goal',f"{row.get('runtime')} / {row.get('goal_status')}"),
