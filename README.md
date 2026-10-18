@@ -4,29 +4,55 @@
 
 ## 安装与启动
 
-在源码目录安装一次（需要 [uv](https://docs.astral.sh/uv/)）：
+clone 后进入项目目录，使用 npm 安装：
 
 ```sh
-uv tool install --python 3.12 .
+npm install -g .
 codex-watchdog
 ```
 
-`uv` 创建独立 Python 环境并将命令放入用户的可执行目录，不安装到系统 Python。确认安装可执行 `codex-watchdog --version` 和 `codex-watchdog --help`。若提示找不到命令，执行 `uv tool update-shell` 后重新打开终端。
+要求 Node.js 18+ 和本机 Python 3.10+（含 curses、sqlite3）。npm 包包含已有 Python 核心，启动器会自动寻找兼容解释器；不需要 uv、pip 或第三方 Python 包。也可以在仓库中直接运行 `npm start`。
 
-也支持 `pipx install .`（Python 3.10+）。源码调试可继续使用 `./control.sh` 或 `PYTHONPATH=src python3 -m codex_watchdog`；这些是开发入口，日常使用安装后的 `codex-watchdog`。
+如果系统默认 Python 较旧，但已安装其他版本，可以指定：
 
-从源码安装为独立副本，拉取更新后需重装：
+```sh
+CODEX_WATCHDOG_PYTHON=/usr/bin/python3.12 codex-watchdog
+```
+
+Ubuntu/Debian 可通过系统包管理器安装 `python3`；部分发行版还需要 `python3-curses`。缺少或版本不兼容时，启动器会给出提示，不会启动服务。
+
+确认命令可用：
+
+```sh
+codex-watchdog --version
+codex-watchdog --help
+```
+
+Node 版本管理器通常已配置全局可执行目录。如果全局安装提示权限不足，可以使用用户目录：
+
+```sh
+npm install -g --prefix "$HOME/.local" .
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+将上述 PATH 设置加入自己的 shell 配置即可在新终端继续使用。已有同名命令时选择一种安装方式；从 uv 迁移可先执行 `uv tool uninstall codex-capacity-watchdog`，它保留配置和状态。
+
+npm 从本地目录全局安装通常链接到该 checkout，因此应保留源码目录。拉取更新后重新安装即可更新入口：
 
 ```sh
 git pull --ff-only
-uv tool install --python 3.12 --reinstall .
+npm install -g .
 ```
 
-升级前停止正在运行的软件，保留配置和状态，再重装并启动。卸载使用 `uv tool uninstall codex-capacity-watchdog`，配置和运行记录保留。
+需要安装不依赖 checkout 的副本时，可执行 `npm pack`，再用 `npm install -g ./codex-watchdog-0.3.0.tgz` 安装生成的包。当前 npm 包仅支持从源码或本地包安装，尚未发布到 npm registry，不能直接执行 `npm install -g codex-watchdog` 从 registry 获取。
+
+升级前停止正在运行的软件，保留配置和状态，再更新并启动。卸载使用 `npm uninstall -g codex-watchdog`；用户目录安装需带同一个 `--prefix`。配置和运行记录保留。
+
+Python 安装方式也继续支持：`uv tool install --python 3.12 .` 或 `pipx install .`。源码调试可使用 `./control.sh` 或 `PYTHONPATH=src python3 -m codex_watchdog`。选择 Python 安装时无需 Node.js。
 
 配置不存在时会打开首次配置表单，填写 Codex 目录、Unix socket 路径和状态目录。默认只观察；勾选容量故障自动恢复授权后才会恢复 Goal。也可复制 `config.example.json` 手动配置。`codex-watchdog init` 单独运行配置表单，已有配置不会被覆盖；`codex-watchdog doctor` 执行只读诊断。
 
-启动后直接在当前终端打开 TUI，同时启动守护服务。要求 Linux、Python 3.10+，以及已经运行的 Codex App Server。TUI 使用标准库 curses，支持 UTF-8 终端。安装后的命令使用独立 Python 环境，无需切换到仓库目录。
+启动后直接在当前终端打开 TUI，同时启动守护服务。要求 Linux、Python 3.10+，以及已经运行的 Codex App Server。TUI 使用标准库 curses，支持 UTF-8 终端。安装后的命令无需切换到仓库目录；npm 入口使用本机 Python，uv/pipx 入口使用其独立 Python 环境。
 
 按两次 Ctrl+C 关闭软件：第一次显示提示，5 秒内再按一次，同时关闭 TUI 并停止守护服务。终端关闭或收到终止信号时也会清理服务。配置、恢复记录和日志保存在服务器本机，均被 Git 忽略。可以从另一终端执行 `codex-watchdog stop` 请求关闭软件；`codex-watchdog status` 查看状态。
 
@@ -121,7 +147,7 @@ Webhook JSON 包含 `event`、`thread_id`、`at` 和简短 `message`，不会发
 
 ## 配置与部署
 
-源码运行默认使用仓库根目录的 `config.json`；安装为 Python 包后默认使用 `$XDG_CONFIG_HOME/codex-watchdog/config.json`（未设置时为 `~/.config/codex-watchdog/config.json`）。可以通过 `--config` 或 `CODEX_WATCHDOG_CONFIG` 指向仓库外的配置。相对路径以配置文件所在目录解析。
+源码 Python 入口默认使用仓库根目录的 `config.json`；npm 入口（包括 `npm start`）和安装为 Python 包的入口默认使用 `$XDG_CONFIG_HOME/codex-watchdog/config.json`（未设置时为 `~/.config/codex-watchdog/config.json`）。可以通过 `--config` 或 `CODEX_WATCHDOG_CONFIG` 指向仓库外的配置。相对路径以配置文件所在目录解析。
 
 `check_interval_seconds` 默认 `300`；`recovery_confirmation_seconds` 默认 `300`；`attention_after_seconds` 默认 `1800`；`stall_after_seconds` 默认 `0`。`state_dir` 保存带版本的恢复基线、去重记录、事件时间线、累计统计和轮转日志，更新代码时应保留。旧版无版本状态自动迁移并保留已尝试轮次；损坏或未知版本会阻止服务启动并保留原文件，通过 doctor 排查或恢复已验证的备份，不能删除去重记录来绕过错误。
 
