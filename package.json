@@ -1,0 +1,27 @@
+{
+  "name": "codex-watchdog",
+  "version": "0.3.0",
+  "private": true,
+  "description": "A terminal watchdog for Codex Goals with safe capacity recovery",
+  "bin": {
+    "codex-watchdog": "bin/codex-watchdog.cjs"
+  },
+  "files": [
+    "bin/*.cjs",
+    "src/codex_watchdog/*.py",
+    "config.example.json",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": ["linux", "darwin"],
+  "scripts": {
+    "start": "node bin/codex-watchdog.cjs",
+    "test": "node --test tests/node/*.test.cjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/Leeiieeo/codex-watchdog.git"
+  }
+}

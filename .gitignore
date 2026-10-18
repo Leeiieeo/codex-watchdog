@@ -11,3 +11,5 @@ state/
 .env
 *.before-*
 .watchdog-managed
+node_modules/
+*.tgz

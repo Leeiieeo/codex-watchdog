@@ -9,6 +9,7 @@ from .storage import atomic_json
 from .view import cells
 from .presentation import Canvas
 from .theme import Palette
+from .lifecycle import launcher_gone
 
 
 def default_config():
@@ -106,6 +107,9 @@ class Setup:
         screen.keypad(True)
         screen.timeout(150)
         while not self.quit:
+            if launcher_gone():
+                self.quit = True
+                break
             self.draw(screen)
             try:
                 key = screen.get_wch()

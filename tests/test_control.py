@@ -232,6 +232,47 @@ class TerminalTests(ConfigTestCase):
         self.proc.send_signal(signal.SIGTERM)
         self.assert_closed()
 
+    def test_npm_launcher_forwards_double_ctrl_c_and_resize(self):
+        import shutil
+        node=shutil.which('node')
+        if node is None:
+            self.skipTest('Node.js is not installed')
+        self.launch([node,str(ROOT/'bin/codex-watchdog.cjs')])
+        # The status PID belongs to the Python UI, its worker is owned by it.
+        status=json.loads((Path(self.config['state_dir'])/'status.json').read_text())
+        ui_pid=status['pid']
+        fcntl.ioctl(self.master,termios.TIOCSWINSZ,struct.pack('HHHH',18,70,0,0))
+        self.proc.send_signal(signal.SIGWINCH)
+        self.output.clear()
+        os.write(self.master,b'g')
+        self.read_until(lambda:'监控规则与提醒设置'.encode() in self.output)
+        os.write(self.master,b'\x03')
+        self.read_until(lambda:'5 秒内再按一次 Ctrl+C'.encode() in self.output)
+        self.assertIsNone(self.proc.poll())
+        os.kill(ui_pid,0)
+        os.kill(self.worker_pid,0)
+        os.write(self.master,b'\x03')
+        self.assert_closed()
+        with self.assertRaises(ProcessLookupError):
+            os.kill(ui_pid,0)
+
+    def test_npm_launcher_disappearance_stops_owned_worker(self):
+        import shutil
+        node=shutil.which('node')
+        if node is None:
+            self.skipTest('Node.js is not installed')
+        self.launch([node,str(ROOT/'bin/codex-watchdog.cjs')])
+        self.proc.kill()
+        self.read_until(lambda:(Path(self.config['state_dir'])/'STOP').exists(),timeout=5)
+        def worker_stopped():
+            try:
+                os.kill(self.worker_pid,0)
+            except ProcessLookupError:
+                return True
+            return False
+        self.read_until(worker_stopped,timeout=5)
+        self.worker_pid=None
+
     def test_first_start_saves_setup_and_opens_application(self):
         self.path.unlink()
         env={**os.environ,'TERM':'xterm-256color','CODEX_WATCHDOG_CONFIG':str(self.path),

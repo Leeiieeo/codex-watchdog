@@ -11,6 +11,7 @@ from .view import dashboard, filter_rows, interval_text
 from .patterns import PATTERNS, pattern_mode, safe_text
 from .events import read_events
 from .theme import Palette
+from .lifecycle import launcher_gone
 
 
 
@@ -278,6 +279,9 @@ class App:
         screen.timeout(150)
         self.refresh()
         while not self.quit:
+            if launcher_gone():
+                self.quit = True
+                break
             if getattr(self, 'palette_dirty', False):
                 self.palette.initialize(screen)
                 self.palette_dirty = False
