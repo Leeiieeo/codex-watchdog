@@ -5,6 +5,7 @@ import json
 import re
 
 CAPACITY_ERROR_CODE = "serverOverloaded"
+CAPACITY_LABEL = "selected model is at capacity"
 CAPACITY_MESSAGE = "selected model is at capacity. please try a different model."
 
 
@@ -18,7 +19,7 @@ class Pattern:
 
 
 PATTERNS = (
-    Pattern('capacity', '模型容量不足', (CAPACITY_ERROR_CODE,), (CAPACITY_MESSAGE,), True),
+    Pattern('capacity', CAPACITY_LABEL, (CAPACITY_ERROR_CODE,), (CAPACITY_MESSAGE,), True),
     Pattern('connection', '模型请求连接失败', (
         'connectionFailed', 'connectionFailure', 'networkError',
         'responseStreamDisconnected', 'responseStreamConnectionFailed'),

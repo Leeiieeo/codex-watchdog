@@ -219,7 +219,7 @@ def set_session_enabled(config_path, thread_id, enabled, registration_id=None):
     return target
 
 
-def set_pattern_mode(config_path, pattern_id, mode):
+def set_pattern_mode(config_path, pattern_id, mode, *, authorize_recovery=False):
     config_path = Path(config_path).expanduser().resolve()
     with config_lock(config_path) as config:
         candidate = next((p for p in PATTERNS if p.id == pattern_id), None)
@@ -227,6 +227,12 @@ def set_pattern_mode(config_path, pattern_id, mode):
             raise ValueError('invalid failure pattern or mode')
         if mode == 'recover' and not candidate.recoverable:
             raise ValueError('this failure pattern only supports observation')
+        if mode == 'recover':
+            if config.get('observe_only') or config.get('user_authorized_capacity_resume') is not True:
+                if authorize_recovery is not True:
+                    raise ValueError('confirm capacity recovery before leaving observation mode')
+                config['observe_only'] = False
+                config['user_authorized_capacity_resume'] = True
         config.setdefault('pattern_modes', {})[pattern_id] = mode
         config['policy_revision'] = str(uuid.uuid4())
         atomic_json(config_path, config)

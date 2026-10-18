@@ -28,6 +28,7 @@ class App:
         self.candidates = []
         self.discovery_done = False
         self.confirm = None
+        self.recovery_confirmation = None
         self.interval_input = None
         self.interval_error = None
         self.interval_kind = 'interval'
@@ -171,6 +172,15 @@ class App:
                 self.interval_input += key
                 self.interval_error = None
             return
+        if self.recovery_confirmation:
+            if key in ('y', 'Y'):
+                pattern_id = self.recovery_confirmation
+                self.recovery_confirmation = None
+                self.task('pattern', lambda: set_pattern_mode(
+                    self.config_path, pattern_id, 'recover', authorize_recovery=True))
+            elif key in ('n', 'N', '\x1b', '\n', '\r'):
+                self.recovery_confirmation = None
+            return
         if key == 'T':
             themes = ('dark', 'light', 'mono')
             self.palette = Palette(themes[(themes.index(self.palette.name)+1)%len(themes)])
@@ -198,13 +208,15 @@ class App:
                 config = self.data['config']
                 if key == 'm':
                     pattern = PATTERNS[self.index]
-                    if config.get('observe_only'):
-                        modes = ['observe', 'off']
-                    else:
-                        modes = ['recover', 'observe', 'off'] if pattern.recoverable else ['observe', 'off']
+                    modes = ['observe', 'recover', 'off'] if pattern.recoverable else ['observe', 'off']
                     mode = pattern_mode(config, pattern)
+                    next_mode = modes[(modes.index(mode)+1)%len(modes)]
+                    if next_mode == 'recover' and (config.get('observe_only')
+                            or config.get('user_authorized_capacity_resume') is not True):
+                        self.recovery_confirmation = pattern.id
+                        return
                     self.task('pattern', set_pattern_mode, self.config_path,
-                              pattern.id, modes[(modes.index(mode)+1)%len(modes)])
+                              pattern.id, next_mode)
                 elif key == 't':
                     self.interval_input, self.interval_error, self.interval_kind = '', None, 'stall'
                 else:

@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 
 from codex_watchdog.tui import App
 from codex_watchdog.view import dashboard, fit, cells, filter_rows, retry_text
+from codex_watchdog.registry import load_config, set_pattern_mode
 
 
 class TuiTests(unittest.TestCase):
@@ -107,6 +108,49 @@ class TuiTests(unittest.TestCase):
                 self.assertEqual(app.mode, 'patterns')
                 app.task.assert_not_called()
                 self.assertEqual(self.path.read_bytes(), before)
+
+    def test_observation_mode_requires_confirmation_before_enabling_recovery(self):
+        self.config.update(observe_only=True, user_authorized_capacity_resume=False)
+        self.path.write_text(json.dumps(self.config))
+        before = self.path.read_bytes()
+        app = self.app()
+        app.key('g')
+        app.task = Mock()
+        app.key('m')
+        self.assertEqual(app.recovery_confirmation, 'capacity')
+        app.task.assert_not_called()
+        self.assertEqual(self.path.read_bytes(), before)
+        app.key('n')
+        self.assertIsNone(app.recovery_confirmation)
+        self.assertEqual(self.path.read_bytes(), before)
+        app.key('m')
+        app.key('y')
+        app.task.call_args.args[1]()
+        config = load_config(self.path)
+        self.assertFalse(config['observe_only'])
+        self.assertTrue(config['user_authorized_capacity_resume'])
+        self.assertEqual(config['pattern_modes']['capacity'], 'recover')
+        self.assertEqual(config['targets'], self.config['targets'])
+        self.assertIn('policy_revision', config)
+
+    def test_authorized_capacity_rule_switches_from_observe_to_recover(self):
+        self.config['pattern_modes'] = {'capacity':'observe'}
+        self.path.write_text(json.dumps(self.config))
+        app = self.app()
+        app.key('g')
+        app.task = Mock()
+        app.key('m')
+        self.assertIsNone(app.recovery_confirmation)
+        self.assertEqual(app.task.call_args.args[0], 'pattern')
+        self.assertEqual(app.task.call_args.args[-2:], ('capacity','recover'))
+
+    def test_registry_rejects_unconfirmed_exit_from_observation_mode(self):
+        self.config.update(observe_only=True, user_authorized_capacity_resume=False)
+        self.path.write_text(json.dumps(self.config))
+        before = self.path.read_bytes()
+        with self.assertRaises(ValueError):
+            set_pattern_mode(self.path, 'capacity', 'recover')
+        self.assertEqual(self.path.read_bytes(), before)
 
     def test_browsing_and_q_never_exit_or_edit_config_or_call_codex(self):
         before = self.path.read_bytes()

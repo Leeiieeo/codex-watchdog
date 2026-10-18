@@ -10,6 +10,7 @@ from .view import cells
 from .presentation import Canvas
 from .theme import Palette
 from .lifecycle import launcher_gone
+from .patterns import CAPACITY_LABEL
 
 
 def default_config():
@@ -83,7 +84,7 @@ class Setup:
             c.text(row,value_x,value,available,'text',fill=True,selected=selected)
         row = top+(11 if roomy else 7)
         selected = self.index==3
-        c.text(row,x+3,('☑' if self.authorized else '☐')+' 容量故障自动恢复',panel_width-6,
+        c.text(row,x+3,('☑' if self.authorized else '☐')+' '+CAPACITY_LABEL+' · 自动恢复',panel_width-6,
                'success' if self.authorized else 'muted',bold=True,selected=selected)
         if roomy:
             c.text(row+1,x+5,'已授权恢复原 Goal' if self.authorized else '默认仅观察，可在此按空格授权',panel_width-8,'muted')

@@ -94,7 +94,7 @@ class PresentationTests(unittest.TestCase):
                     self.app.index = 0
                     self.app.scroll = 0
                     screen = self.render(height,width)
-                    self.assertIn('容量不足',screen.text)
+                    self.assertIn('selected model is at capacity',screen.text)
                     self.app.key('j')
                     self.render(height,width)
 
@@ -111,6 +111,14 @@ class PresentationTests(unittest.TestCase):
         self.assertIn('检查间隔',screen.text)
         self.assertIn('0.5▏',screen.text)
 
+    def test_recovery_confirmation_explains_effect_in_compact_dialog(self):
+        self.app.recovery_confirmation='capacity'
+        screen = self.render(18,70)
+        self.assertIn('启用自动恢复',screen.text)
+        self.assertIn('selected model is at capacity',screen.text)
+        self.assertIn('y 确认启用',screen.text)
+        self.assertIn('关闭全局观察模式',screen.text)
+
     def test_state_labels_and_monochrome_selection_are_accessible(self):
         screen = self.render()
         self.assertIn('正常工作',screen.text)
@@ -121,7 +129,7 @@ class PresentationTests(unittest.TestCase):
     def test_selected_rule_remains_visible_after_wrapping_and_resize(self):
         self.app.mode='patterns'
         for height,width in ((18,70),(30,130),(18,70)):
-            for index,name in enumerate(('模型容量不足','模型请求连接失败','配额或速率限制','认证失败','服务内部错误')):
+            for index,name in enumerate(('selected model is at capacity','模型请求连接失败','配额或速率限制','认证失败','服务内部错误')):
                 self.app.index=index
                 self.assertIn('› '+name,self.render(height,width).text)
 
@@ -185,7 +193,7 @@ class SetupPresentationTests(unittest.TestCase):
                 screen=Buffer(height,width)
                 app.draw(screen)
                 self.assertIn('首次配置',screen.text)
-                self.assertIn('容量故障自动恢复',screen.text)
+                self.assertIn('selected model is at capacity',screen.text)
                 self.assertIn('Enter',screen.text)
                 if selected<3:
                     self.assertIn('▏',screen.text)

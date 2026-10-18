@@ -310,7 +310,7 @@ class Features(unittest.TestCase):
                 app.scroll=0
                 screen=Screen()
                 app.draw(screen)
-                self.assertIn('容量不足',''.join(text for line in screen.lines.values() for text in line))
+                self.assertIn('selected model is at capacity',''.join(text for line in screen.lines.values() for text in line))
                 app.key('j')
                 app.draw(screen)
         app.mode='main'

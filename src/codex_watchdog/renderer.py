@@ -3,7 +3,7 @@ from datetime import datetime
 import time
 
 from .events import EVENT_NAMES, read_events
-from .patterns import PATTERNS, CAPACITY_MESSAGE, pattern_mode
+from .patterns import PATTERNS, CAPACITY_LABEL, pattern_mode
 from .presentation import Canvas, HEALTH, RUNTIME, GOAL, phase_text, severity, readable_wrap
 from .view import activity_text, cells, interval_text, log_lines, retry_text, wrap_text
 
@@ -72,8 +72,8 @@ class Renderer:
             c.text(2,25,'● 监控 '+HEALTH.get(monitor,monitor)+f" {d.get('successful_targets',0)}/{len(rows)}",self.w-27,health_role(monitor),bold=True)
             c.text(3,2,'最近成功 '+age_text(d.get('last_success_age')),27,'muted')
             c.text(3,31,'需关注 '+str(count)+' · 下次 '+retry_text(d.get('next_check_at'),self.now),self.w-33,'warning' if count else 'muted')
-            c.text(5,2,'容量不足 · '+MODE_NAMES[pattern_mode(self.config,PATTERNS[0])],27,'accent')
-            c.text(5,31,'间隔 '+interval_text(d.get('check_interval_seconds',300))+' · g 规则',self.w-33,'muted')
+            c.text(5,2,CAPACITY_LABEL+' · '+MODE_NAMES[pattern_mode(self.config,PATTERNS[0])],42,'accent')
+            c.text(5,46,'间隔 '+interval_text(d.get('check_interval_seconds',300))+' · g 规则',self.w-48,'muted')
             return
         gap = 2
         widths = [(self.w-4-2*gap)//3]*3
@@ -92,10 +92,12 @@ class Renderer:
             c.text(5, x+2, note, width-4, 'muted')
             x += width+gap
         mode = MODE_NAMES[pattern_mode(self.config, PATTERNS[0])]
-        c.text(7, 2, '容量不足 · '+mode, 24, 'success' if mode=='自动恢复' else 'muted')
-        c.text(7, 27, '间隔 '+interval_text(d.get('check_interval_seconds', 300)), 20, 'muted')
-        c.text(7, 49, 'g 规则与提醒', 20, 'muted')
-        if self.w >= 100:
+        c.text(7, 2, CAPACITY_LABEL+' · '+mode, 42, 'success' if mode=='自动恢复' else 'muted')
+        if self.w < 120:
+            c.text(7,46,'间隔 '+interval_text(d.get('check_interval_seconds',300))+' · g 规则',self.w-48,'muted')
+        else:
+            c.text(7, 46, '间隔 '+interval_text(d.get('check_interval_seconds', 300)), 20, 'muted')
+            c.text(7, 68, 'g 规则与提醒', 20, 'muted')
             theme = getattr(self.app, 'palette', None)
             c.text(7,self.w-22,'T '+{'dark':'深色','light':'浅色','mono':'单色'}.get(theme.name if theme else 'mono','单色')+'主题',20,'muted')
 
@@ -211,7 +213,7 @@ class Renderer:
             section('失败与恢复')
             failure = row.get('last_failure') or {}
             field('最近失败', failure.get('message') or '暂无失败记录', severity(row))
-            field('匹配规则', failure.get('pattern_name') or '-')
+            field('匹配规则', CAPACITY_LABEL if failure.get('pattern') == 'capacity' else failure.get('pattern_name') or '-')
             field('错误码', failure.get('code') or '-', 'muted')
             if row.get('error'): field('读取异常', row['error'], 'danger')
             if row.get('attention'): field('提醒','恢复未确认或持续失败，请检查 Codex 状态','warning')
@@ -245,6 +247,8 @@ class Renderer:
             field('t 停顿提醒',interval_text(config.get('stall_after_seconds',0)) if config.get('stall_after_seconds') else '关闭')
             field('Webhook 环境变量',settings.get('webhook_url_env','CODEX_WATCHDOG_WEBHOOK_URL'),'muted')
             content += [('仅容量故障支持自动恢复；停顿只提醒。','muted'),
+                        ('选中 selected model is at capacity 后按 m：仅记录 → 自动恢复。','accent'),
+                        ('首次启用需按 y 确认；已有失败会作为基线。','muted'),
                         ('全局观察模式：'+('开启' if config.get('observe_only') else '关闭'),'warning' if config.get('observe_only') else 'muted')]
         elif app.mode == 'doctor':
             for row in (app.diagnostic or {}).get('checks',[]):
@@ -306,7 +310,7 @@ class Renderer:
     def dialog(self):
         app, c = self.app, self.canvas
         interrupt = time.monotonic()<app.exit_confirmation_until
-        if not (app.interval_input is not None or app.confirm or interrupt):
+        if not (app.interval_input is not None or app.confirm or app.recovery_confirmation or interrupt):
             return
         width = min(68,self.w-8)
         height = 8
@@ -315,6 +319,10 @@ class Renderer:
         if interrupt:
             title, message = '关闭软件', '5 秒内再按一次 Ctrl+C，关闭界面和守护服务'
             value, helptext, role = '', '继续使用时，退出提示会自动取消。', 'warning'
+        elif app.recovery_confirmation:
+            title, message = '启用自动恢复', CAPACITY_LABEL
+            value = '将关闭全局观察模式，仅恢复新出现的容量故障。'
+            helptext, role = 'y 确认启用    n / Esc 取消；保留 Goal、模型和预算。', 'warning'
         elif app.confirm:
             title, message = '移除守护', app.confirm['label']
             value,helptext,role = app.confirm['cwd'],'y 确认移除    n / Esc 取消','danger'
