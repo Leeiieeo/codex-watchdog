@@ -271,7 +271,35 @@ class TerminalTests(ConfigTestCase):
                 return True
             return False
         self.read_until(worker_stopped,timeout=5)
+        service_status=Path(self.config['state_dir'])/'service-status.json'
+        self.read_until(lambda:service_status.exists()
+                        and json.loads(service_status.read_text()).get('phase')=='stopped',timeout=5)
         self.worker_pid=None
+
+    def test_rules_enable_recovery_and_time_keys_do_not_switch_theme(self):
+        config=load_config(self.path)
+        config.update(observe_only=True,user_authorized_capacity_resume=False)
+        self.path.write_text(json.dumps(config))
+        self.launch([str(ROOT/'control.sh')],theme='dark')
+        os.write(self.master,b'g')
+        self.read_until(lambda:'selected model is at capacity'.encode() in self.output)
+        os.write(self.master,b'm')
+        self.read_until(lambda:'启用自动恢复'.encode() in self.output)
+        self.assertTrue(load_config(self.path)['observe_only'])
+        os.write(self.master,b'y')
+        self.read_until(lambda:not load_config(self.path)['observe_only']
+                        and '规则已更新'.encode() in self.output)
+        self.assertEqual(load_config(self.path)['pattern_modes']['capacity'],'recover')
+        self.output.clear()
+        os.write(self.master,b'T')
+        self.read_until(lambda:'输入分钟数'.encode() in self.output)
+        self.assertNotIn('浅色主题'.encode(),self.output)
+        os.write(self.master,b'\x1b')
+        self.output.clear()
+        os.write(self.master,b'C')
+        self.read_until(lambda:'浅色主题'.encode() in self.output)
+        self.proc.send_signal(signal.SIGTERM)
+        self.assert_closed()
 
     def test_first_start_saves_setup_and_opens_application(self):
         self.path.unlink()
