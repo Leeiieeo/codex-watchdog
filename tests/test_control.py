@@ -203,7 +203,7 @@ class TerminalTests(ConfigTestCase):
 
     def test_current_terminal_start_and_double_ctrl_c_close_both(self):
         self.launch([str(ROOT/'control.sh')])
-        for key, title in ((b'P','监控规则与提醒设置'),(b'?','键盘帮助'),(b'e','事件时间线'),(b'l','守护日志')):
+        for key, title in ((b'g','监控规则与提醒设置'),(b'?','键盘帮助'),(b'e','事件时间线'),(b'l','守护日志')):
             self.output.clear()
             os.write(self.master,key)
             self.read_until(lambda: title.encode() in self.output)

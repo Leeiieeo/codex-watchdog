@@ -136,6 +136,14 @@ class PresentationTests(unittest.TestCase):
         self.rows[0].update(error='daemon disconnected',phase='suspended')
         self.assertIn('1 个会话',self.render().text)
 
+    def test_rule_hints_use_a_different_letter_from_guard_toggle(self):
+        for height, width in ((18, 70), (30, 130)):
+            with self.subTest(height=height, width=width):
+                text = self.render(height, width).text
+                self.assertIn('g 规则', text)
+                self.assertIn('p 暂停', text)
+                self.assertNotIn('P 规则', text)
+
 
 class ThemeTests(unittest.TestCase):
     def test_theme_can_be_selected_without_changing_terminal_settings(self):

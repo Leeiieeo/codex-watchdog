@@ -248,7 +248,7 @@ class App:
             self.confirm = dict(self.selected())
         elif key == 'i' and self.mode == 'main' and not self.busy:
             self.interval_input, self.interval_error, self.interval_kind = '',None,'interval'
-        elif key == 'p' and self.mode == 'main' and self.selected() and not self.busy:
+        elif key in ('p', 'P') and self.mode == 'main' and self.selected() and not self.busy:
             row = self.selected()
             self.task('toggle', set_session_enabled, self.config_path, row['thread_id'],
                       not row.get('enabled', True), row.get('registration_id'))
@@ -258,8 +258,8 @@ class App:
                 self.task('add', add_session, self.config_path, row['thread_id'])
             elif row and self.mode == 'main':
                 self.detail, self.mode, self.scroll = row['thread_id'], 'detail', 0
-        elif key in ('l', 'e', 'P', '?') and self.mode == 'main':
-            self.mode = {'l':'logs','e':'events','P':'patterns','?':'help'}[key]
+        elif key in ('l', 'e', 'g', 'G', '?') and self.mode == 'main':
+            self.mode = {'l':'logs','e':'events','g':'patterns','G':'patterns','?':'help'}[key]
             self.detail, self.scroll, self.index = None, 0, 0
         elif key == 'D' and not self.busy:
             from .diagnostics import doctor

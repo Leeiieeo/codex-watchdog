@@ -73,7 +73,7 @@ class Renderer:
             c.text(3,2,'最近成功 '+age_text(d.get('last_success_age')),27,'muted')
             c.text(3,31,'需关注 '+str(count)+' · 下次 '+retry_text(d.get('next_check_at'),self.now),self.w-33,'warning' if count else 'muted')
             c.text(5,2,'容量不足 · '+MODE_NAMES[pattern_mode(self.config,PATTERNS[0])],27,'accent')
-            c.text(5,31,'间隔 '+interval_text(d.get('check_interval_seconds',300))+' · P 规则',self.w-33,'muted')
+            c.text(5,31,'间隔 '+interval_text(d.get('check_interval_seconds',300))+' · g 规则',self.w-33,'muted')
             return
         gap = 2
         widths = [(self.w-4-2*gap)//3]*3
@@ -94,7 +94,7 @@ class Renderer:
         mode = MODE_NAMES[pattern_mode(self.config, PATTERNS[0])]
         c.text(7, 2, '容量不足 · '+mode, 24, 'success' if mode=='自动恢复' else 'muted')
         c.text(7, 27, '间隔 '+interval_text(d.get('check_interval_seconds', 300)), 20, 'muted')
-        c.text(7, 49, 'P 规则与提醒', 20, 'muted')
+        c.text(7, 49, 'g 规则与提醒', 20, 'muted')
         if self.w >= 100:
             theme = getattr(self.app, 'palette', None)
             c.text(7,self.w-22,'T '+{'dark':'深色','light':'浅色','mono':'单色'}.get(theme.name if theme else 'mono','单色')+'主题',20,'muted')
@@ -253,8 +253,8 @@ class Renderer:
                             ('   '+row['message'],'muted'), ('','text')]
             if not app.diagnostic: content.append(('正在执行只读诊断…','accent'))
         elif app.mode == 'help':
-            for title, lines in [('会话管理',['↑↓ / j k 选择会话','a 添加 · d 移除 · p 暂停/启用','Enter 详情 · / 搜索']),
-                                 ('观察与设置',['e 时间线 · l 日志（s 切换服务日志）','P 规则与提醒 · D 只读诊断','i 检查间隔 · r 刷新']),
+            for title, lines in [('会话管理',['↑↓ / j k 选择会话','a 添加 · d 移除 · p/P 暂停/启用','Enter 详情 · / 搜索']),
+                                 ('观察与设置',['e 时间线 · l 日志（s 切换服务日志）','g/G 规则与提醒 · D 只读诊断','i 检查间隔 · r 刷新']),
                                  ('导航与退出',['↑↓ / PgUp / PgDn 滚动详情','Esc 返回或取消','5 秒内按两次 Ctrl+C 关闭整个软件']),
                                  ('终端显示',['T 切换深色、浅色和单色主题','字体和字号由终端设置','建议等宽字体、14–16 pt，窗口至少 120 × 30','无彩色终端会使用文字、粗体和反白提示'])]:
                 section(title)
@@ -299,7 +299,7 @@ class Renderer:
                 [('↑↓','滚动'),('s','服务日志'),('Esc','返回')] if app.mode=='logs' else
                 [('↑↓','滚动'),('e','时间线'),('Esc','返回')] if app.mode=='detail' else
                 [('↑↓','滚动'),('Esc','返回')] if app.mode in ('events','doctor','help') else
-                [('a','添加'),('p','暂停'),('Enter','详情'),('e','历史'),('P','规则'),('?','帮助')])
+                [('a','添加'),('p','暂停'),('Enter','详情'),('e','历史'),('g','规则'),('?','帮助')])
         c.keys(self.h-2,3,keys,self.w-6)
         c.text(self.h-1,3,'Ctrl+C × 2 关闭软件',self.w-6,'muted')
 

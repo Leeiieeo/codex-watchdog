@@ -85,6 +85,29 @@ class TuiTests(unittest.TestCase):
         self.assertEqual(app.task.call_args.args[0],'remove')
         self.assertEqual(app.task.call_args.args[-2:],('one','v1'))
 
+    def test_pause_key_has_the_same_action_in_both_cases(self):
+        for key in ('p', 'P'):
+            for enabled in (True, False):
+                with self.subTest(key=key, enabled=enabled):
+                    app = self.app()
+                    app.rows[0]['enabled'] = enabled
+                    app.task = Mock()
+                    app.key(key)
+                    self.assertEqual(app.mode, 'main')
+                    self.assertEqual(app.task.call_args.args[0], 'toggle')
+                    self.assertEqual(app.task.call_args.args[-3:], ('one', not enabled, 'v1'))
+
+    def test_rules_key_opens_rules_without_changing_guarding(self):
+        before = self.path.read_bytes()
+        for key in ('g', 'G'):
+            with self.subTest(key=key):
+                app = self.app()
+                app.task = Mock()
+                app.key(key)
+                self.assertEqual(app.mode, 'patterns')
+                app.task.assert_not_called()
+                self.assertEqual(self.path.read_bytes(), before)
+
     def test_browsing_and_q_never_exit_or_edit_config_or_call_codex(self):
         before = self.path.read_bytes()
         with patch('codex_watchdog.registry.Client',side_effect=AssertionError('unexpected RPC')):
