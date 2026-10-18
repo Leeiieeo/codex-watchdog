@@ -220,7 +220,7 @@ class TerminalTests(ConfigTestCase):
     def test_color_theme_switch_and_compact_resize_keep_application_alive(self):
         self.launch([str(ROOT/'control.sh')],theme='dark')
         self.assertIn(b'48;5;234',self.output)
-        os.write(self.master,b'T')
+        os.write(self.master,b'c')
         self.read_until(lambda:'浅色主题'.encode() in self.output)
         self.assertIn(b'48;5;255',self.output)
         fcntl.ioctl(self.master,termios.TIOCSWINSZ,struct.pack('HHHH',18,70,0,0))

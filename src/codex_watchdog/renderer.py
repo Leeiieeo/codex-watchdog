@@ -99,7 +99,7 @@ class Renderer:
             c.text(7, 46, '间隔 '+interval_text(d.get('check_interval_seconds', 300)), 20, 'muted')
             c.text(7, 68, 'g 规则与提醒', 20, 'muted')
             theme = getattr(self.app, 'palette', None)
-            c.text(7,self.w-22,'T '+{'dark':'深色','light':'浅色','mono':'单色'}.get(theme.name if theme else 'mono','单色')+'主题',20,'muted')
+            c.text(7,self.w-22,'c '+{'dark':'深色','light':'浅色','mono':'单色'}.get(theme.name if theme else 'mono','单色')+'主题',20,'muted')
 
     def sessions(self):
         app, c = self.app, self.canvas
@@ -244,7 +244,7 @@ class Renderer:
             settings = config.get('notifications',{})
             field('n 通知','开启' if settings.get('enabled') else '关闭')
             field('b 终端响铃','开启' if settings.get('terminal_bell') else '关闭')
-            field('t 停顿提醒',interval_text(config.get('stall_after_seconds',0)) if config.get('stall_after_seconds') else '关闭')
+            field('t/T 停顿提醒时间',interval_text(config.get('stall_after_seconds',0)) if config.get('stall_after_seconds') else '关闭')
             field('Webhook 环境变量',settings.get('webhook_url_env','CODEX_WATCHDOG_WEBHOOK_URL'),'muted')
             content += [('仅容量故障支持自动恢复；停顿只提醒。','muted'),
                         ('选中 selected model is at capacity 后按 m：仅记录 → 自动恢复。','accent'),
@@ -260,7 +260,7 @@ class Renderer:
             for title, lines in [('会话管理',['↑↓ / j k 选择会话','a 添加 · d 移除 · p/P 暂停/启用','Enter 详情 · / 搜索']),
                                  ('观察与设置',['e 时间线 · l 日志（s 切换服务日志）','g/G 规则与提醒 · D 只读诊断','i 检查间隔 · r 刷新']),
                                  ('导航与退出',['↑↓ / PgUp / PgDn 滚动详情','Esc 返回或取消','5 秒内按两次 Ctrl+C 关闭整个软件']),
-                                 ('终端显示',['T 切换深色、浅色和单色主题','字体和字号由终端设置','建议等宽字体、14–16 pt，窗口至少 120 × 30','无彩色终端会使用文字、粗体和反白提示'])]:
+                                 ('终端显示',['c/C 切换深色、浅色和单色主题','规则页 t/T 设置停顿提醒时间','字体和字号由终端设置','建议等宽字体、14–16 pt，窗口至少 120 × 30','无彩色终端会使用文字、粗体和反白提示'])]:
                 section(title)
                 content.extend((line,'muted') for line in lines)
         return content

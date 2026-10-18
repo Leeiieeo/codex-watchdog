@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 from codex_watchdog.tui import App
 from codex_watchdog.view import dashboard, fit, cells, filter_rows, retry_text
 from codex_watchdog.registry import load_config, set_pattern_mode
+from codex_watchdog.theme import Palette
 
 
 class TuiTests(unittest.TestCase):
@@ -151,6 +152,40 @@ class TuiTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             set_pattern_mode(self.path, 'capacity', 'recover')
         self.assertEqual(self.path.read_bytes(), before)
+
+    def test_time_keys_open_the_same_dialog_without_switching_theme(self):
+        for key in ('t', 'T'):
+            with self.subTest(key=key):
+                app = self.app()
+                app.key('g')
+                palette = app.palette
+                app.key(key)
+                self.assertEqual(app.interval_kind, 'stall')
+                self.assertEqual(app.interval_input, '')
+                self.assertIs(app.palette, palette)
+
+    def test_color_keys_switch_theme_without_opening_time_dialog(self):
+        for key in ('c', 'C'):
+            with self.subTest(key=key), patch.dict(os.environ, {}, clear=True):
+                app = self.app()
+                app.palette = Palette('dark')
+                app.key('g')
+                app.key(key)
+                self.assertEqual(app.palette.name, 'light')
+                self.assertIsNone(app.interval_input)
+
+    def test_theme_keys_do_not_intercept_filter_or_confirmation_input(self):
+        app = self.app()
+        app.key('/')
+        palette = app.palette
+        app.key('C')
+        self.assertEqual(app.query, 'C')
+        self.assertIs(app.palette, palette)
+        app.key('\x1b')
+        app.recovery_confirmation = 'capacity'
+        app.key('C')
+        self.assertIs(app.palette, palette)
+        self.assertEqual(app.recovery_confirmation, 'capacity')
 
     def test_browsing_and_q_never_exit_or_edit_config_or_call_codex(self):
         before = self.path.read_bytes()

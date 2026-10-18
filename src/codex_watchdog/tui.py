@@ -181,12 +181,6 @@ class App:
             elif key in ('n', 'N', '\x1b', '\n', '\r'):
                 self.recovery_confirmation = None
             return
-        if key == 'T':
-            themes = ('dark', 'light', 'mono')
-            self.palette = Palette(themes[(themes.index(self.palette.name)+1)%len(themes)])
-            self.palette_dirty = True
-            self.toast('主题: '+{'dark':'深色','light':'浅色','mono':'单色'}[self.palette.name])
-            return
         if self.confirm:
             if key in ('y','Y'):
                 row, self.confirm = self.confirm, None
@@ -200,11 +194,17 @@ class App:
             elif isinstance(key,str) and key.isprintable() and len(self.query) < 100: self.query += key
             self.index, self.focus = 0, None
             return
+        if key in ('c', 'C'):
+            themes = ('dark', 'light', 'mono')
+            self.palette = Palette(themes[(themes.index(self.palette.name)+1)%len(themes)])
+            self.palette_dirty = True
+            self.toast('主题: '+{'dark':'深色','light':'浅色','mono':'单色'}[self.palette.name])
+            return
         if self.mode == 'patterns':
             if key in (curses.KEY_NPAGE, curses.KEY_PPAGE):
                 self.scroll = max(0, self.scroll+(8 if key == curses.KEY_NPAGE else -8))
                 return
-            if key in ('m', 'n', 'b', 't') and not self.busy:
+            if key in ('m', 'n', 'b', 't', 'T') and not self.busy:
                 config = self.data['config']
                 if key == 'm':
                     pattern = PATTERNS[self.index]
@@ -217,7 +217,7 @@ class App:
                         return
                     self.task('pattern', set_pattern_mode, self.config_path,
                               pattern.id, next_mode)
-                elif key == 't':
+                elif key in ('t', 'T'):
                     self.interval_input, self.interval_error, self.interval_kind = '', None, 'stall'
                 else:
                     setting = 'enabled' if key == 'n' else 'terminal_bell'
