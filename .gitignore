@@ -11,10 +11,3 @@ state/
 .env
 *.before-*
 .watchdog-managed
-/rpc.py
-/watchdog.py
-/test_watchdog.py
-/PLAN.md
-/DESIGN.md
-/VALIDATION.md
-/RECOVERY-VERIFICATION.json

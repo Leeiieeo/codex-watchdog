@@ -13,30 +13,15 @@ import random
 import signal
 import sqlite3
 import time
-import uuid
 
 from .rpc import Client
+from .storage import atomic_json
+from .registry import load_config, add_session, remove_session, discover_sessions
 
 LOG = logging.getLogger("codex-watchdog")
 TERMINAL = {"complete", "usage_limited", "budget_limited"}
 STATUS_MAP = {"usageLimited": "usage_limited", "budgetLimited": "budget_limited"}
 CAPACITY_MESSAGE = "selected model is at capacity. please try a different model."
-
-
-def atomic_json(path, value):
-    path = Path(path)
-    temp = path.with_name(path.name + ".tmp")
-    with temp.open("w") as stream:
-        json.dump(value, stream, indent=2, sort_keys=True)
-        stream.write("\n")
-        stream.flush()
-        os.fsync(stream.fileno())
-    os.replace(temp, path)
-    fd = os.open(str(path.parent), os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
 
 
 def capacity(error):
@@ -85,6 +70,7 @@ def snapshot(client, target, codex_home):
         raise ValueError("goal API/database revision mismatch")
     return {
         "thread_id": tid,
+        "title": thread.get("name"),
         "runtime": thread.get("status", {}).get("type"),
         "goal": after,
         "turn": turns[0] if turns else None,
@@ -214,52 +200,26 @@ def attempt(state, observed, read_again, persist, resume, stopped, now):
 
 def summary(s):
     g, t = s.get("goal") or {}, s.get("turn") or {}
-    return {"runtime": s.get("runtime"), "goal_status": g.get("status"),
+    return {"title": s.get("title"), "runtime": s.get("runtime"), "goal_status": g.get("status"),
             "goal_id": g.get("goal_id"), "turn_id": t.get("id"),
             "turn_status": t.get("status"), "capacity_error": capacity(t.get("error"))}
 
 
-def load_config(path):
-    config = json.loads(Path(path).read_text())
-    if config.get("user_authorized_capacity_resume") is not True:
-        raise ValueError("explicit capacity-resume authorization missing in config")
-    targets = config.get("targets", [])
-    if not isinstance(targets, list) or len({x["thread_id"] for x in targets}) != len(targets):
-        raise ValueError("targets must be explicit and unique")
-    for target in targets:
-        if not all(isinstance(target.get(k), str) and target[k] for k in ("thread_id", "cwd", "label")):
-            raise ValueError("each target needs thread_id, cwd and label")
-    for key in ("codex_home", "socket_path", "state_dir"):
-        config[key] = str(Path(config[key]).expanduser().resolve())
-    return config
-
-
 def configure(args, config):
-    """Change only this watchdog's allowlist, never the Codex thread."""
+    """CLI and TUI share the same serialized allowlist operations."""
     if args.remove:
-        config["targets"] = [t for t in config["targets"] if t["thread_id"] != args.remove]
-        atomic_json(args.config, config)
+        remove_session(args.config, args.remove)
         print("Removed; takes effect at the next observation (normally within 5 seconds).")
-        return
-    client = Client(config["socket_path"])
-    try:
-        ids = [args.add] if args.add else client.request("thread/loaded/list", {}).get("data", [])
-        for tid in ids:
-            thread = client.request("thread/read", {"threadId": tid})["thread"]
-            if isinstance(thread.get("source"), dict) and "subAgent" in thread["source"]:
-                if args.add:
-                    raise ValueError("select a main thread, not a child agent")
-                continue
-            target = {"thread_id": tid, "cwd": thread["cwd"],
-                      "label": args.label or thread.get("name") or Path(thread["cwd"]).name,
-                      "registration_id": str(uuid.uuid4())}
-            if args.add:
-                config["targets"] = [t for t in config["targets"] if t["thread_id"] != tid] + [target]
-                atomic_json(args.config, config)
-                print("Added; existing failed turns will be baselined, not resumed.")
-            print(json.dumps({**target, "runtime": thread.get("status")}, ensure_ascii=False))
-    finally:
-        client.close()
+    elif args.add:
+        target = add_session(args.config, args.add, args.label)
+        print("Added; existing failed turns will be baselined, not resumed.")
+        print(json.dumps(target, ensure_ascii=False))
+    else:
+        result = discover_sessions(args.config)
+        for target in result["sessions"]:
+            print(json.dumps(target, ensure_ascii=False))
+        for warning in result["warnings"]:
+            print("Warning: "+warning)
 
 
 def main():
@@ -359,6 +319,7 @@ def main():
                             )
                             LOG.info("resume_attempt thread=%s accepted=%s", tid, accepted)
                         status["targets"][tid] = {"label": target["label"], **summary(current),
+                                                   "registration_id": target.get("registration_id"),
                                                    "phase": item["phase"], "attempts": item["attempts"],
                                                    "next_retry_at": (item.get("pending") or {}).get("due")}
                     except Exception as exc:

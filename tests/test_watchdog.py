@@ -443,7 +443,7 @@ class IntegrationTests(unittest.TestCase):
             client = Mock()
             client.request.return_value = {"thread": {"id": "thread-1", "cwd": "/project", "source": "cli"}}
             args = SimpleNamespace(config=str(path), add="thread-1", remove=None, label="Example")
-            with patch("codex_watchdog.watchdog.Client", return_value=client):
+            with patch("codex_watchdog.registry.Client", return_value=client):
                 configure(args, config)
             client.request.assert_called_once_with("thread/read", {"threadId": "thread-1"})
             added = load_config(path)
