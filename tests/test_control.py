@@ -163,7 +163,7 @@ class TerminalTests(ConfigTestCase):
                     break
         self.assertTrue(predicate(), self.output.decode('utf-8', errors='replace'))
 
-    def launch(self, command):
+    def launch(self, command, theme=None):
         # A fake tmux executable fails if startup tries to invoke it.
         tools = Path(self.tmp.name)/'bin'
         tools.mkdir()
@@ -175,6 +175,9 @@ class TerminalTests(ConfigTestCase):
                'CODEX_WATCHDOG_CONFIG': str(self.path), 'CODEX_WATCHDOG_PYTHON': sys.executable,
                'CODEX_WATCHDOG_TEST_TMUX_MARKER': str(marker),
                'PATH': str(tools)+os.pathsep+os.environ.get('PATH', '')}
+        if theme:
+            env.pop('NO_COLOR',None)
+            env['CODEX_WATCHDOG_THEME'] = theme
         self.master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 30, 130, 0, 0))
         try:
@@ -212,6 +215,21 @@ class TerminalTests(ConfigTestCase):
         os.kill(self.worker_pid, 0)
         self.assertFalse((Path(self.config['state_dir'])/'STOP').exists())
         os.write(self.master, b'\x03')
+        self.assert_closed()
+
+    def test_color_theme_switch_and_compact_resize_keep_application_alive(self):
+        self.launch([str(ROOT/'control.sh')],theme='dark')
+        self.assertIn(b'48;5;234',self.output)
+        os.write(self.master,b'T')
+        self.read_until(lambda:'浅色主题'.encode() in self.output)
+        self.assertIn(b'48;5;255',self.output)
+        fcntl.ioctl(self.master,termios.TIOCSWINSZ,struct.pack('HHHH',18,70,0,0))
+        self.proc.send_signal(signal.SIGWINCH)
+        self.output.clear()
+        os.write(self.master,b'?')
+        self.read_until(lambda:'键盘帮助'.encode() in self.output)
+        self.assertIsNone(self.proc.poll())
+        self.proc.send_signal(signal.SIGTERM)
         self.assert_closed()
 
     def test_first_start_saves_setup_and_opens_application(self):

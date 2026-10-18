@@ -1,10 +1,13 @@
 import curses
 import tempfile
 import unittest
+import os
+from unittest.mock import Mock, patch
 
 from codex_watchdog.renderer import Renderer
 from codex_watchdog.tui import App
 from codex_watchdog.view import cells
+from codex_watchdog.theme import Palette, resolve_theme
 
 
 class Buffer:
@@ -112,3 +115,37 @@ class PresentationTests(unittest.TestCase):
         self.assertIn('等待重试',screen.text)
         self.assertIn('守护已暂停',screen.text)
         self.assertTrue(any(attr & curses.A_REVERSE for row in screen.attributes for attr in row))
+
+    def test_attention_card_handles_real_error_messages(self):
+        self.rows[0].update(error='daemon disconnected',phase='suspended')
+        self.assertIn('1 个会话',self.render().text)
+
+
+class ThemeTests(unittest.TestCase):
+    def test_theme_can_be_selected_without_changing_terminal_settings(self):
+        with patch.dict(os.environ,{'CODEX_WATCHDOG_THEME':'light'},clear=True):
+            self.assertEqual(resolve_theme(),'light')
+        with patch.dict(os.environ,{'COLORFGBG':'0;15'},clear=True):
+            self.assertEqual(resolve_theme(),'light')
+        with patch.dict(os.environ,{'NO_COLOR':'','CODEX_WATCHDOG_THEME':'dark'},clear=True):
+            self.assertEqual(resolve_theme(),'mono')
+
+    def test_extended_and_basic_terminals_initialize_semantic_colors(self):
+        for colors in (8,256):
+            with self.subTest(colors=colors), patch.dict(os.environ,{},clear=True), patch('codex_watchdog.theme.curses.has_colors',return_value=True), \
+                    patch('codex_watchdog.theme.curses.start_color'), \
+                    patch('codex_watchdog.theme.curses.COLORS',colors,create=True), \
+                    patch('codex_watchdog.theme.curses.init_pair') as init, \
+                    patch('codex_watchdog.theme.curses.color_pair',side_effect=lambda n:n*256):
+                palette=Palette('dark')
+                palette.initialize(Mock())
+                self.assertEqual(len(palette.pairs),10)
+                self.assertNotEqual(palette.attr('success'),palette.attr('danger'))
+                self.assertTrue(all(0<=value<colors for call in init.call_args_list for value in call.args[1:]))
+
+    def test_no_color_terminal_still_has_selection_and_warning_emphasis(self):
+        palette=Palette('mono')
+        with patch('codex_watchdog.theme.curses.has_colors',return_value=False):
+            palette.initialize(Mock())
+        self.assertEqual(palette.attr('selection'),curses.A_REVERSE)
+        self.assertEqual(palette.attr('danger'),curses.A_BOLD)

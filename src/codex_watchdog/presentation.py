@@ -78,6 +78,13 @@ class Canvas:
         if title:
             self.text(y, x+2, ' '+title+' ', width-5, 'heading', bold=True)
 
+    def progress(self, y, x, ratio, width, role='accent'):
+        if width < 3:
+            return
+        filled = max(0,min(width,int(width*ratio)))
+        self.text(y,x,'━'*filled,filled,role)
+        self.text(y,x+filled,'─'*(width-filled),width-filled,'border')
+
     def paragraph(self, y, x, value, width, max_lines=2, role='text'):
         lines = wrap_text(value, width)
         for n, line in enumerate(lines[:max_lines]):

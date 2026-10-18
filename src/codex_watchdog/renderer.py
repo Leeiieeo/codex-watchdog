@@ -12,6 +12,16 @@ PAGE_TITLES = {'main':'会话总览', 'add':'添加会话', 'detail':'会话详�
 MODE_NAMES = {'recover':'自动恢复', 'observe':'仅记录', 'off':'已禁用'}
 
 
+def health_role(value):
+    if value in ('running','healthy'):
+        return 'success'
+    if value in ('error','blocked','stale'):
+        return 'danger'
+    if value in ('degraded','restarting'):
+        return 'warning'
+    return 'muted'
+
+
 def age_text(seconds):
     if seconds is None:
         return '尚无记录'
@@ -34,7 +44,7 @@ class Renderer:
         c, app = self.canvas, self.app
         c.screen.erase()
         c.text(0, 2, 'CODEX WATCHDOG', role='heading', bold=True)
-        c.text(0, 19, '/ '+PAGE_TITLES[app.mode], role='muted')
+        c.text(0, 19, '/ '+PAGE_TITLES[app.mode], self.w-31, 'muted')
         if self.h < 18 or self.w < 70:
             c.paragraph(3, 2, '请将终端调整到至少 70 列、18 行。', max(1, self.w-4))
             c.paragraph(6, 2, '5 秒内再按一次 Ctrl+C 关闭软件' if time.monotonic() < app.exit_confirmation_until
@@ -56,33 +66,38 @@ class Renderer:
         service = d.get('service_health', d.get('health', 'unknown'))
         monitor = d.get('monitor_health', 'unknown')
         rows = d.get('rows', [])
-        count = sum(row.get('error') or row.get('attention') or row.get('phase') in ('suspended','resume_outcome_unknown','observed_failure') for row in rows)
+        count = sum(bool(row.get('error') or row.get('attention') or row.get('phase') in ('suspended','resume_outcome_unknown','observed_failure')) for row in rows)
         if self.compact:
-            c.text(2,2,'服务 '+HEALTH.get(service,service),22,bold=True)
-            c.text(2,25,'监控 '+HEALTH.get(monitor,monitor)+f" {d.get('successful_targets',0)}/{len(rows)}",25,bold=True)
+            c.text(2,2,'● 服务 '+HEALTH.get(service,service),22,health_role(service),bold=True)
+            c.text(2,25,'● 监控 '+HEALTH.get(monitor,monitor)+f" {d.get('successful_targets',0)}/{len(rows)}",self.w-27,health_role(monitor),bold=True)
             c.text(3,2,'最近成功 '+age_text(d.get('last_success_age')),27,'muted')
-            c.text(3,31,'需关注 '+str(count)+' · 下次 '+retry_text(d.get('next_check_at'),self.now),self.w-33,'muted')
+            c.text(3,31,'需关注 '+str(count)+' · 下次 '+retry_text(d.get('next_check_at'),self.now),self.w-33,'warning' if count else 'muted')
             c.text(5,2,'容量不足 · '+MODE_NAMES[pattern_mode(self.config,PATTERNS[0])],27,'accent')
             c.text(5,31,'间隔 '+interval_text(d.get('check_interval_seconds',300))+' · P 规则',self.w-33,'muted')
             return
         gap = 2
         widths = [(self.w-4-2*gap)//3]*3
         widths[-1] = self.w-4-2*gap-sum(widths[:2])
-        cards = [('守护服务', HEALTH.get(service, service), '最近尝试 '+age_text(d.get('age'))),
+        cards = [('守护服务', '● '+HEALTH.get(service, service), '最近尝试 '+age_text(d.get('age')),health_role(service)),
                  ('监控连接', HEALTH.get(monitor, monitor)+f"  {d.get('successful_targets', 0)}/{len(rows)}",
-                  '最近成功 '+age_text(d.get('last_success_age'))),
+                  '最近成功 '+age_text(d.get('last_success_age')),health_role(monitor)),
                  ('需要关注', f'{count} 个会话' if count else '暂无异常',
-                  '下次检查 '+retry_text(d.get('next_check_at'), self.now))]
+                  '下次检查 '+retry_text(d.get('next_check_at'), self.now),'warning' if count else 'success')]
         x = 2
-        for (title, value, note), width in zip(cards, widths):
+        for (title, value, note, role), width in zip(cards, widths):
             c.box(2, x, 5, width, title)
-            c.text(3, x+2, value, width-4, bold=True)
+            c.text(3, x+2, value, width-4, role, bold=True)
+            if title == '监控连接' and rows:
+                c.progress(4,x+2,d.get('successful_targets',0)/len(rows),width-4,role)
             c.text(5, x+2, note, width-4, 'muted')
             x += width+gap
         mode = MODE_NAMES[pattern_mode(self.config, PATTERNS[0])]
-        c.text(7, 2, '容量不足 · '+mode, 24, 'accent')
+        c.text(7, 2, '容量不足 · '+mode, 24, 'success' if mode=='自动恢复' else 'muted')
         c.text(7, 27, '间隔 '+interval_text(d.get('check_interval_seconds', 300)), 20, 'muted')
-        c.text(7, 49, 'P 规则与提醒', self.w-51, 'muted')
+        c.text(7, 49, 'P 规则与提醒', 20, 'muted')
+        if self.w >= 100:
+            theme = getattr(self.app, 'palette', None)
+            c.text(7,self.w-22,'T '+{'dark':'深色','light':'浅色','mono':'单色'}.get(theme.name if theme else 'mono','单色')+'主题',20,'muted')
 
     def sessions(self):
         app, c = self.app, self.canvas
@@ -132,6 +147,8 @@ class Renderer:
             for n, ((_, width), value) in enumerate(zip(fields, values)):
                 c.text(y, x, value, width-1, role if n else 'text', bold=selected, selected=selected)
                 x += width
+            if not selected:
+                c.text(y,4,{'success':'●','warning':'◷','danger':'!','muted':'Ⅱ','accent':'·'}[role],1,role)
             if roomy and y+1 < end:
                 subtitle = row.get('title') or row.get('reason') or row['cwd']
                 c.text(y+1, 6, subtitle, inner-2, 'muted')
@@ -239,7 +256,7 @@ class Renderer:
             for title, lines in [('会话管理',['↑↓ / j k 选择会话','a 添加 · d 移除 · p 暂停/启用','Enter 详情 · / 搜索']),
                                  ('观察与设置',['e 时间线 · l 日志（s 切换服务日志）','P 规则与提醒 · D 只读诊断','i 检查间隔 · r 刷新']),
                                  ('导航与退出',['↑↓ / PgUp / PgDn 滚动详情','Esc 返回或取消','5 秒内按两次 Ctrl+C 关闭整个软件']),
-                                 ('终端显示',['字体和字号由终端设置','建议等宽字体、14–16 pt，窗口至少 120 × 30','无彩色终端会使用文字、粗体和反白提示'])]:
+                                 ('终端显示',['T 切换深色、浅色和单色主题','字体和字号由终端设置','建议等宽字体、14–16 pt，窗口至少 120 × 30','无彩色终端会使用文字、粗体和反白提示'])]:
                 section(title)
                 content.extend((line,'muted') for line in lines)
         return content
@@ -287,7 +304,7 @@ class Renderer:
         width = min(68,self.w-8)
         height = 8
         x,y = (self.w-width)//2,max(1,(self.h-height)//2)
-        for row in range(y,y+height): c.text(row,x,'',width,fill=True)
+        for row in range(y,y+height): c.text(row,x,'',width,role='dialog',fill=True)
         if interrupt:
             title, message = '关闭软件', '5 秒内再按一次 Ctrl+C，关闭界面和守护服务'
             value, helptext, role = '', '继续使用时，退出提示会自动取消。', 'warning'

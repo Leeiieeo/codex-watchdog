@@ -10,6 +10,7 @@ from .registry import (add_session, discover_sessions, remove_session,
 from .view import dashboard, filter_rows, interval_text
 from .patterns import PATTERNS, pattern_mode, safe_text
 from .events import read_events
+from .theme import Palette
 
 
 
@@ -43,6 +44,7 @@ class App:
         self.log_service = False
         self.diagnostic = None
         self.last_notification_id = None
+        self.palette = Palette()
 
     def task(self, kind, function, *args):
         if self.busy:
@@ -168,6 +170,12 @@ class App:
                 self.interval_input += key
                 self.interval_error = None
             return
+        if key == 'T':
+            themes = ('dark', 'light', 'mono')
+            self.palette = Palette(themes[(themes.index(self.palette.name)+1)%len(themes)])
+            self.palette_dirty = True
+            self.toast('主题: '+{'dark':'深色','light':'浅色','mono':'单色'}[self.palette.name])
+            return
         if self.confirm:
             if key in ('y','Y'):
                 row, self.confirm = self.confirm, None
@@ -266,20 +274,14 @@ class App:
     def run(self, screen):
         try: curses.curs_set(0)
         except curses.error: pass
-        if curses.has_colors():
-            curses.start_color()
-            background = 0
-            try:
-                curses.use_default_colors()
-                background = -1
-            except curses.error: pass
-            for n,color in ((1,curses.COLOR_CYAN),(2,curses.COLOR_YELLOW),(3,curses.COLOR_RED)):
-                try: curses.init_pair(n,color,background)
-                except curses.error: pass
+        self.palette.initialize(screen)
         screen.keypad(True)
         screen.timeout(150)
         self.refresh()
         while not self.quit:
+            if getattr(self, 'palette_dirty', False):
+                self.palette.initialize(screen)
+                self.palette_dirty = False
             if self.service:
                 if self.service.stop_requested:
                     self.quit = True
