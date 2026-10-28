@@ -1,4 +1,5 @@
 import curses
+from contextlib import closing
 import fcntl
 import json
 import os
@@ -6,6 +7,7 @@ from pathlib import Path
 import pty
 import select
 import signal
+import sqlite3
 import struct
 import subprocess
 import sys
@@ -18,6 +20,7 @@ from unittest.mock import Mock, patch
 from codex_watchdog import control
 from codex_watchdog.registry import load_config
 from codex_watchdog.service import Service
+from test_watchdog import FakeServer
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -216,6 +219,69 @@ class TerminalTests(ConfigTestCase):
         self.assertFalse((Path(self.config['state_dir'])/'STOP').exists())
         os.write(self.master, b'\x03')
         self.assert_closed()
+
+    def test_discover_add_observe_pause_resume_remove_and_exit_without_goal(self):
+        config = load_config(self.path)
+        config['check_interval_seconds'] = 1
+        self.path.write_text(json.dumps(config))
+        with closing(sqlite3.connect(Path(self.tmp.name)/'goals_1.sqlite')) as db, db:
+            db.execute('CREATE TABLE thread_goals(thread_id,goal_id,status,token_budget,tokens_used,created_at_ms,updated_at_ms)')
+        def handler(message):
+            method = message['method']
+            if method == 'thread/loaded/list':
+                return {'data':['thread-1']}
+            if method == 'thread/read':
+                return {'thread':{'id':'thread-1', 'cwd':'/project', 'name':'No Goal session',
+                                  'source':'cli', 'status':{'type':'active'}}}
+            if method == 'thread/goal/get':
+                return {'goal':None}
+            if method == 'thread/turns/list':
+                return {'data':[{'id':'turn-1', 'status':'inProgress', 'startedAt':int(time.time())}]}
+            raise AssertionError('unexpected mutation: '+method)
+        server = FakeServer(config['socket_path'], handler, connections=3)
+        status_path = Path(config['state_dir'])/'status.json'
+        def phase():
+            return json.loads(status_path.read_text()).get('targets', {}).get('thread-1', {}).get('phase')
+        try:
+            self.launch([str(ROOT/'control.sh')])
+            os.write(self.master, b'a')
+            self.read_until(lambda:b'No Goal session' in self.output)
+            self.output.clear()
+            os.write(self.master, b'\n')
+            self.read_until(lambda:len(load_config(self.path)['targets']) == 1
+                            and '已加入守护'.encode() in self.output)
+            self.read_until(lambda:phase() in ('baseline', 'goal_stopped') and '未设置'.encode() in self.output)
+            self.assertIsNone(self.proc.poll())
+            self.output.clear()
+            os.write(self.master, b'\n')
+            self.read_until(lambda:'失败与恢复'.encode() in self.output)
+            os.write(self.master, b'\x1b')
+            self.read_until(lambda:'受管理的 Codex 会话'.encode() in self.output)
+            self.output.clear()
+            os.write(self.master, b'p')
+            self.read_until(lambda:not load_config(self.path)['targets'][0].get('enabled', True)
+                            and phase() == 'guard_paused' and '已暂停守护'.encode() in self.output)
+            self.output.clear()
+            os.write(self.master, b'p')
+            self.read_until(lambda:load_config(self.path)['targets'][0]['enabled']
+                            and '已启用守护'.encode() in self.output)
+            self.output.clear()
+            os.write(self.master, b'd')
+            self.read_until(lambda:'移除守护'.encode() in self.output)
+            os.write(self.master, b'y')
+            self.read_until(lambda:not load_config(self.path)['targets']
+                            and '已移除守护'.encode() in self.output)
+            os.write(self.master, b'\x03')
+            self.read_until(lambda:'5 秒内再按一次 Ctrl+C'.encode() in self.output)
+            os.write(self.master, b'\x03')
+            self.assert_closed()
+        finally:
+            if self.proc is not None and self.proc.poll() is None:
+                self.proc.send_signal(signal.SIGTERM)
+                self.proc.wait(timeout=12)
+            server.join()
+        self.assertNotIn('thread/goal/set', [call['method'] for call in server.calls])
+        self.assertNotIn(b'Traceback', self.output)
 
     def test_color_theme_switch_and_compact_resize_keep_application_alive(self):
         self.launch([str(ROOT/'control.sh')],theme='dark')

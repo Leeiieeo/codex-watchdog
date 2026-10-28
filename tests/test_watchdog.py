@@ -298,8 +298,9 @@ class PolicyTests(unittest.TestCase):
 
 
 class FakeServer:
-    def __init__(self, path, handler, fragment=False, ping=False, invalid_accept=False):
+    def __init__(self, path, handler, fragment=False, ping=False, invalid_accept=False, connections=1):
         self.path, self.handler = path, handler
+        self.connections = connections
         self.fragment, self.ping, self.invalid_accept = fragment, ping, invalid_accept
         self.calls, self.errors = [], []
         self.listener = socket.socket(socket.AF_UNIX)
@@ -330,50 +331,55 @@ class FakeServer:
 
     def run(self):
         try:
-            with self.listener.accept()[0] as conn:
-                conn.settimeout(15)
-                header = b""
-                while not header.endswith(b"\r\n\r\n"):
-                    header += self.readn(conn, 1)
-                key = next(x.split(b":", 1)[1].strip() for x in header.split(b"\r\n")
-                           if x.lower().startswith(b"sec-websocket-key:"))
-                value = base64.b64encode(hashlib.sha1(key+b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest())
-                if self.invalid_accept:
-                    value = b"wrong"
-                conn.sendall(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "+value+b"\r\n\r\n")
-                while True:
-                    a, b = self.readn(conn, 2)
-                    if not b & 128:
-                        raise AssertionError("client frame not masked")
-                    size = b & 127
-                    if size == 126:
-                        size = struct.unpack("!H", self.readn(conn, 2))[0]
-                    elif size == 127:
-                        size = struct.unpack("!Q", self.readn(conn, 8))[0]
-                    mask = self.readn(conn, 4)
-                    data = bytes(x ^ mask[i%4] for i,x in enumerate(self.readn(conn, size)))
-                    if a & 15 == 10:
-                        continue
-                    message = json.loads(data)
-                    self.calls.append(message)
-                    if "id" not in message:
-                        continue
-                    result = {} if message["method"] == "initialize" else self.handler(message)
-                    response = json.dumps({"id": message["id"], "result": result}).encode()
-                    if self.ping:
-                        self.frame(conn, b"ping", opcode=9)
-                    if self.fragment:
-                        middle = len(response)//2
-                        self.frame(conn, response[:middle], final=False)
-                        self.frame(conn, response[middle:], opcode=0)
-                    else:
-                        self.frame(conn, response)
-        except (EOFError, BrokenPipeError, ConnectionResetError):
-            pass
+            for _ in range(self.connections):
+                try:
+                    with self.listener.accept()[0] as conn:
+                        self.serve(conn)
+                except (EOFError, BrokenPipeError, ConnectionResetError):
+                    pass
         except Exception as exc:
             self.errors.append(exc)
         finally:
             self.listener.close()
+
+    def serve(self, conn):
+        conn.settimeout(15)
+        header = b""
+        while not header.endswith(b"\r\n\r\n"):
+            header += self.readn(conn, 1)
+        key = next(x.split(b":", 1)[1].strip() for x in header.split(b"\r\n")
+                   if x.lower().startswith(b"sec-websocket-key:"))
+        value = base64.b64encode(hashlib.sha1(key+b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest())
+        if self.invalid_accept:
+            value = b"wrong"
+        conn.sendall(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "+value+b"\r\n\r\n")
+        while True:
+            a, b = self.readn(conn, 2)
+            if not b & 128:
+                raise AssertionError("client frame not masked")
+            size = b & 127
+            if size == 126:
+                size = struct.unpack("!H", self.readn(conn, 2))[0]
+            elif size == 127:
+                size = struct.unpack("!Q", self.readn(conn, 8))[0]
+            mask = self.readn(conn, 4)
+            data = bytes(x ^ mask[i%4] for i,x in enumerate(self.readn(conn, size)))
+            if a & 15 == 10:
+                continue
+            message = json.loads(data)
+            self.calls.append(message)
+            if "id" not in message:
+                continue
+            result = {} if message["method"] == "initialize" else self.handler(message)
+            response = json.dumps({"id": message["id"], "result": result}).encode()
+            if self.ping:
+                self.frame(conn, b"ping", opcode=9)
+            if self.fragment:
+                middle = len(response)//2
+                self.frame(conn, response[:middle], final=False)
+                self.frame(conn, response[middle:], opcode=0)
+            else:
+                self.frame(conn, response)
 
     def join(self):
         self.thread.join(timeout=6)
