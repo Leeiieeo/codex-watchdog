@@ -232,6 +232,37 @@ class TerminalTests(ConfigTestCase):
         self.proc.send_signal(signal.SIGTERM)
         self.assert_closed()
 
+    def test_render_failure_keeps_worker_alive_and_retry_restores_interface(self):
+        script = '''
+from codex_watchdog.control import main
+from codex_watchdog.renderer import Renderer
+original = Renderer.draw
+failed = False
+def draw(self):
+    global failed
+    if not failed:
+        failed = True
+        raise TypeError('injected display failure')
+    return original(self)
+Renderer.draw = draw
+main()
+'''
+        self.launch([sys.executable, '-c', script])
+        self.read_until(lambda:'界面暂不可用'.encode() in self.output)
+        self.assertIsNone(self.proc.poll())
+        os.kill(self.worker_pid, 0)
+        self.assertIn('injected display failure',
+                      (Path(self.config['state_dir'])/'ui.log').read_text())
+        self.assertFalse((Path(self.config['state_dir'])/'STOP').exists())
+        self.output.clear()
+        os.write(self.master, b'r')
+        self.read_until(lambda:'受管理的 Codex 会话'.encode() in self.output)
+        os.kill(self.worker_pid, 0)
+        os.write(self.master, b'\x03')
+        self.read_until(lambda:'5 秒内再按一次 Ctrl+C'.encode() in self.output)
+        os.write(self.master, b'\x03')
+        self.assert_closed()
+
     def test_npm_launcher_forwards_double_ctrl_c_and_resize(self):
         import shutil
         node=shutil.which('node')

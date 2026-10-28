@@ -234,7 +234,7 @@ class Renderer:
                 content += [(line,role), ('    '+str(event.get('reason') or event.get('message') or ''),'muted')]
             if not events: content.append(('暂无事件，首次观察后会自动记录。','muted'))
         elif app.mode == 'logs':
-            for line in reversed(log_lines(config,service=app.log_service)):
+            for line in reversed(log_lines(config,source=app.log_source)):
                 content.append((line, 'danger' if 'ERROR' in line else 'warning' if 'WARNING' in line else 'muted'))
         elif app.mode == 'patterns':
             for index, pattern in enumerate(PATTERNS):
@@ -259,7 +259,7 @@ class Renderer:
             if not app.diagnostic: content.append(('正在执行只读诊断…','accent'))
         elif app.mode == 'help':
             for title, lines in [('会话管理',['↑↓ / j k 选择会话','a 添加 · d 移除 · p/P 暂停/启用','Enter 详情 · / 搜索']),
-                                 ('观察与设置',['e 时间线 · l 日志（s 切换服务日志）','g/G 规则与提醒 · D 只读诊断','i 检查间隔 · r 刷新']),
+                                 ('观察与设置',['e 时间线 · l 日志（s 切换守护 / 服务 / 界面日志）','g/G 规则与提醒 · D 只读诊断','i 检查间隔 · r 刷新']),
                                  ('导航与退出',['↑↓ / PgUp / PgDn 滚动详情','Esc 返回或取消','5 秒内按两次 Ctrl+C 关闭整个软件']),
                                  ('终端显示',['c/C 切换深色、浅色和单色主题','规则页 t/T 设置停顿提醒时间','字体和字号由终端设置','建议等宽字体、14–16 pt，窗口至少 120 × 30','无彩色终端会使用文字、粗体和反白提示'])]:
                 section(title)
@@ -268,7 +268,8 @@ class Renderer:
 
     def page(self):
         app, c = self.app, self.canvas
-        title = '服务日志' if app.mode == 'logs' and app.log_service else PAGE_TITLES[app.mode]
+        title = ({'watchdog':'守护日志', 'service':'服务日志', 'ui':'界面日志'}[app.log_source]
+                 if app.mode == 'logs' else PAGE_TITLES[app.mode])
         top = self.body_top
         bottom = self.h-5
         c.box(top,2,bottom-top+1,self.w-4,title)
@@ -301,7 +302,7 @@ class Renderer:
             c.text(self.h-4,3,'! '+error,self.w-6,'danger')
         keys = ([('↑↓','选择'),('Enter','添加'),('/','搜索'),('r','发现'),('Esc','返回')] if app.mode=='add' else
                 [('↑↓','选择'),('m','模式'),('n','通知'),('b','响铃'),('t','提醒'),('Esc','返回')] if app.mode=='patterns' else
-                [('↑↓','滚动'),('s','服务日志'),('Esc','返回')] if app.mode=='logs' else
+                [('↑↓','滚动'),('s','切换日志'),('Esc','返回')] if app.mode=='logs' else
                 [('↑↓','滚动'),('e','时间线'),('Esc','返回')] if app.mode=='detail' else
                 [('↑↓','滚动'),('Esc','返回')] if app.mode in ('events','doctor','help') else
                 [('a','添加'),('p','暂停'),('Enter','详情'),('e','历史'),('g','规则'),('?','帮助')])

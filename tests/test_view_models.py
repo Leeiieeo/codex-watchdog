@@ -37,10 +37,12 @@ class ViewModelTests(unittest.TestCase):
         app.data = model
         screen = Buffer(45, 180)
         app.draw(screen)
+        self.assertIsNone(app.render_error)
         main_text = screen.text
         for row in model.rows:
             app.mode, app.detail = 'detail', row.thread_id
             app.draw(screen)
+            self.assertIsNone(app.render_error)
         return main_text
 
     def test_pending_absent_failed_and_stale_are_distinct(self):

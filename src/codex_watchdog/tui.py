@@ -7,8 +7,9 @@ import time
 from .registry import (add_session, discover_sessions, remove_session,
                        set_check_interval, minutes_to_seconds, set_session_enabled,
                        set_pattern_mode, set_options)
-from .view import dashboard, filter_rows, interval_text
-from .view_models import DashboardView, discovered_session
+from .view import dashboard, filter_rows, fit, interval_text
+from .view_models import DashboardView, ViewDataError, discovered_session
+from .ui_errors import UiErrors
 from .patterns import PATTERNS, pattern_mode, safe_text
 from .events import read_events
 from .theme import Palette
@@ -44,10 +45,12 @@ class App:
         self.view_error = None
         self.quit = False
         self.scroll = 0
-        self.log_service = False
+        self.log_source = 'watchdog'
         self.diagnostic = None
         self.last_notification_id = None
         self.palette = Palette()
+        self.ui_errors = UiErrors()
+        self.render_error = None
 
     def task(self, kind, function, *args):
         if self.busy:
@@ -65,7 +68,19 @@ class App:
     def refresh(self):
         try:
             self.data = dashboard(self.config_path)
+            self.ui_errors.state_dir = self.data.config['state_dir']
             self.view_error = None
+            if self.data.error:
+                self.ui_errors.record('snapshot', ViewDataError(self.data.error))
+            for row in self.data.rows:
+                if row.reason_code == 'invalid_observation':
+                    self.ui_errors.record('session '+row.thread_id, ViewDataError(row.error))
+        except Exception as exc:
+            self.view_error = self.ui_errors.record('dashboard', exc)
+            self.data = (self.data or DashboardView()).unavailable(self.view_error)
+            self.last_refresh = time.monotonic()
+            return
+        try:
             notifications = [e for e in read_events(self.data.config['state_dir'], limit=20)
                              if e.get('kind') == 'notification']
             if notifications:
@@ -81,8 +96,7 @@ class App:
             elif self.last_notification_id is None:
                 self.last_notification_id = ''
         except Exception as exc:
-            self.view_error = safe_text(str(exc))
-            self.data = (self.data or DashboardView()).unavailable(self.view_error)
+            self.view_error = self.ui_errors.record('notifications', exc)
         self.last_refresh = time.monotonic()
 
     def poll(self):
@@ -98,7 +112,7 @@ class App:
                 try:
                     self.candidates.append(discovered_session(raw))
                 except ValueError as exc:
-                    warnings.append(safe_text(str(exc)))
+                    warnings.append(self.ui_errors.record('discovery', exc))
             self.discovery_done = True
             self.index = 0
             self.focus = None
@@ -153,6 +167,18 @@ class App:
             self.interrupt()
             return
         if key == curses.KEY_RESIZE: return
+        if self.render_error is not None:
+            # Never execute a hidden confirmation or mutation on the fallback page.
+            if key in ('r', '\x1b', 'l'):
+                self.render_error = None
+                self.interval_input = self.confirm = self.recovery_confirmation = None
+                self.editing_filter = False
+                self.mode = 'logs' if key == 'l' else 'main' if key == '\x1b' else self.mode
+                if key == 'l':
+                    self.log_source = 'ui'
+                self.scroll = 0
+                self.refresh()
+            return
         if self.interval_input is not None:
             if key == '\x1b':
                 self.interval_input = None
@@ -242,7 +268,8 @@ class App:
                 self.scroll = max(0, self.scroll+step)
                 return
             if key == 's' and self.mode == 'logs':
-                self.log_service = not self.log_service
+                sources = ('watchdog', 'service', 'ui')
+                self.log_source = sources[(sources.index(self.log_source)+1)%len(sources)]
                 self.scroll = 0
                 return
             if key == 'e' and self.mode == 'detail':
@@ -289,7 +316,29 @@ class App:
 
     def draw(self, screen):
         from .renderer import Renderer
-        Renderer(self, screen).draw()
+        if self.render_error is None:
+            try:
+                Renderer(self, screen).draw()
+                return
+            except Exception as exc:
+                self.render_error = self.ui_errors.record('render '+self.mode, exc)
+        self.draw_fallback(screen)
+
+    def draw_fallback(self, screen):
+        """Keep recovery controls reachable without invoking the failed renderer."""
+        screen.erase()
+        height, width = screen.getmaxyx()
+        lines = ['CODEX WATCHDOG / 界面暂不可用', '',
+                 '此页显示出错，可重试或查看界面日志。', self.render_error or '', '',
+                 'r 重试  ·  Esc 返回列表  ·  l 界面日志',
+                 '5 秒内再按 Ctrl+C 关闭界面和守护服务' if time.monotonic() < self.exit_confirmation_until
+                 else 'Ctrl+C × 2 关闭界面和守护服务']
+        for y, line in enumerate(lines[:height]):
+            try:
+                screen.addstr(y, 0, fit(line, max(0, width-1)))
+            except curses.error:
+                pass
+        screen.refresh()
 
     def run(self, screen):
         try: curses.curs_set(0)

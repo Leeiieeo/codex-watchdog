@@ -152,9 +152,12 @@ def filter_rows(rows, query):
         (row.label, row.title, row.cwd, row.runtime or '', row.goal.status or '', row.phase)).casefold()]
 
 
-def log_lines(config, thread_id=None, service=False):
+def log_lines(config, thread_id=None, service=False, source=None):
+    source = source or ('service' if service else 'watchdog')
+    if source not in ('watchdog', 'service', 'ui'):
+        raise ValueError('unknown log source')
     try:
-        with (Path(config['state_dir'])/('service.log' if service else 'watchdog.log')).open('rb') as stream:
+        with (Path(config['state_dir'])/(source+'.log')).open('rb') as stream:
             size = stream.seek(0, 2)
             start = max(0, size-65536)
             stream.seek(start)
