@@ -274,15 +274,22 @@ class Features(unittest.TestCase):
         self.assertIn('earlier crash',path.with_name('service.log.1').read_text())
 
     def test_setup_defaults_to_observation_and_does_not_overwrite(self):
-        setup=Setup(self.root/'new-config.json')
-        screen=Mock()
-        screen.getmaxyx.return_value=(24,100)
-        screen.get_wch.return_value='\n'
-        self.assertTrue(setup.run(screen))
-        config=load_config(setup.path)
-        self.assertTrue(config['observe_only'])
-        self.assertFalse(config['user_authorized_capacity_resume'])
-        with self.assertRaises(ValueError): setup.run(screen)
+        for name, env in (('color', {}), ('mono', {'NO_COLOR': '1'})):
+            with self.subTest(theme=name), patch.dict(os.environ, env, clear=True), \
+                    patch('codex_watchdog.theme.curses.has_colors', return_value=False), \
+                    patch('codex_watchdog.setup.curses.curs_set'):
+                # A fake screen must not query an uninitialized real terminal.
+                setup=Setup(self.root/f'new-config-{name}.json')
+                screen=Mock()
+                screen.getmaxyx.return_value=(24,100)
+                screen.get_wch.return_value='\n'
+                self.assertTrue(setup.run(screen))
+                config=load_config(setup.path)
+                self.assertTrue(config['observe_only'])
+                self.assertFalse(config['user_authorized_capacity_resume'])
+                original=setup.path.read_bytes()
+                with self.assertRaises(ValueError): setup.run(screen)
+                self.assertEqual(setup.path.read_bytes(), original)
 
     def test_config_location_handles_installed_package_and_override(self):
         with patch.dict(os.environ, {'CODEX_WATCHDOG_CONFIG':'/tmp/explicit.json'}):
