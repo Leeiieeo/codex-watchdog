@@ -4,8 +4,10 @@ import time
 
 from .events import EVENT_NAMES, read_events
 from .patterns import PATTERNS, CAPACITY_LABEL, pattern_mode
-from .presentation import Canvas, HEALTH, RUNTIME, GOAL, phase_text, severity, readable_wrap
+from .presentation import (Canvas, HEALTH, runtime_text, goal_text, phase_text,
+                           severity, readable_wrap)
 from .view import activity_text, cells, interval_text, log_lines, retry_text, wrap_text
+from .view_models import DashboardView, FailureView
 
 PAGE_TITLES = {'main':'会话总览', 'add':'添加会话', 'detail':'会话详情', 'events':'事件时间线',
                'patterns':'监控规则与提醒设置', 'doctor':'运行诊断', 'help':'键盘帮助', 'logs':'守护日志'}
@@ -34,8 +36,8 @@ class Renderer:
         self.app = app
         self.canvas = Canvas(screen, getattr(app, 'palette', None))
         self.h, self.w = screen.getmaxyx()
-        self.data = app.data or {}
-        self.config = self.data.get('config', {})
+        self.data = app.data or DashboardView()
+        self.config = self.data.config
         self.now = time.time()
         self.compact = self.h < 24
         self.body_top = 7 if self.compact else 9
@@ -63,40 +65,40 @@ class Renderer:
 
     def header(self):
         c, d = self.canvas, self.data
-        service = d.get('service_health', d.get('health', 'unknown'))
-        monitor = d.get('monitor_health', 'unknown')
-        rows = d.get('rows', [])
-        count = sum(bool(row.get('error') or row.get('attention') or row.get('phase') in ('suspended','resume_outcome_unknown','observed_failure')) for row in rows)
+        service = d.service_health
+        monitor = d.monitor_health
+        rows = d.rows
+        count = sum(bool(row.error or row.attention or row.phase in ('suspended','resume_outcome_unknown','observed_failure')) for row in rows)
         if self.compact:
             c.text(2,2,'● 服务 '+HEALTH.get(service,service),22,health_role(service),bold=True)
-            c.text(2,25,'● 监控 '+HEALTH.get(monitor,monitor)+f" {d.get('successful_targets',0)}/{len(rows)}",self.w-27,health_role(monitor),bold=True)
-            c.text(3,2,'最近成功 '+age_text(d.get('last_success_age')),27,'muted')
-            c.text(3,31,'需关注 '+str(count)+' · 下次 '+retry_text(d.get('next_check_at'),self.now),self.w-33,'warning' if count else 'muted')
+            c.text(2,25,'● 监控 '+HEALTH.get(monitor,monitor)+f" {d.successful_targets}/{len(rows)}",self.w-27,health_role(monitor),bold=True)
+            c.text(3,2,'最近成功 '+age_text(d.last_success_age),27,'muted')
+            c.text(3,31,'需关注 '+str(count)+' · 下次 '+retry_text(d.next_check_at,self.now),self.w-33,'warning' if count else 'muted')
             c.text(5,2,CAPACITY_LABEL+' · '+MODE_NAMES[pattern_mode(self.config,PATTERNS[0])],42,'accent')
-            c.text(5,46,'间隔 '+interval_text(d.get('check_interval_seconds',300))+' · g 规则',self.w-48,'muted')
+            c.text(5,46,'间隔 '+interval_text(d.check_interval_seconds)+' · g 规则',self.w-48,'muted')
             return
         gap = 2
         widths = [(self.w-4-2*gap)//3]*3
         widths[-1] = self.w-4-2*gap-sum(widths[:2])
-        cards = [('守护服务', '● '+HEALTH.get(service, service), '最近尝试 '+age_text(d.get('age')),health_role(service)),
-                 ('监控连接', HEALTH.get(monitor, monitor)+f"  {d.get('successful_targets', 0)}/{len(rows)}",
-                  '最近成功 '+age_text(d.get('last_success_age')),health_role(monitor)),
+        cards = [('守护服务', '● '+HEALTH.get(service, service), '最近尝试 '+age_text(d.age),health_role(service)),
+                 ('监控连接', HEALTH.get(monitor, monitor)+f"  {d.successful_targets}/{len(rows)}",
+                  '最近成功 '+age_text(d.last_success_age),health_role(monitor)),
                  ('需要关注', f'{count} 个会话' if count else '暂无异常',
-                  '下次检查 '+retry_text(d.get('next_check_at'), self.now),'warning' if count else 'success')]
+                  '下次检查 '+retry_text(d.next_check_at, self.now),'warning' if count else 'success')]
         x = 2
         for (title, value, note, role), width in zip(cards, widths):
             c.box(2, x, 5, width, title)
             c.text(3, x+2, value, width-4, role, bold=True)
             if title == '监控连接' and rows:
-                c.progress(4,x+2,d.get('successful_targets',0)/len(rows),width-4,role)
+                c.progress(4,x+2,d.successful_targets/len(rows),width-4,role)
             c.text(5, x+2, note, width-4, 'muted')
             x += width+gap
         mode = MODE_NAMES[pattern_mode(self.config, PATTERNS[0])]
         c.text(7, 2, CAPACITY_LABEL+' · '+mode, 42, 'success' if mode=='自动恢复' else 'muted')
         if self.w < 120:
-            c.text(7,46,'间隔 '+interval_text(d.get('check_interval_seconds',300))+' · g 规则',self.w-48,'muted')
+            c.text(7,46,'间隔 '+interval_text(d.check_interval_seconds)+' · g 规则',self.w-48,'muted')
         else:
-            c.text(7, 46, '间隔 '+interval_text(d.get('check_interval_seconds', 300)), 20, 'muted')
+            c.text(7, 46, '间隔 '+interval_text(d.check_interval_seconds), 20, 'muted')
             c.text(7, 68, 'g 规则与提醒', 20, 'muted')
             theme = getattr(self.app, 'palette', None)
             c.text(7,self.w-22,'c '+{'dark':'深色','light':'浅色','mono':'单色'}.get(theme.name if theme else 'mono','单色')+'主题',20,'muted')
@@ -134,17 +136,16 @@ class Renderer:
             y = top+4+offset*step
             selected = number == app.index
             c.text(y, 3, '', left_width-2, fill=True, selected=selected)
-            label = ('› ' if selected else '  ')+row['label']
+            label = ('› ' if selected else '  ')+row.label
             role = severity(row)
             if app.mode == 'add':
-                values = [label, RUNTIME.get(row.get('runtime'), row.get('runtime', '-')),
-                          activity_text(row.get('updated_at'))]
+                values = [label, runtime_text(row),
+                          activity_text(row.updated_at)]
             elif len(fields) == 5:
-                values = [label, RUNTIME.get(row.get('runtime'), row.get('runtime', '-')),
-                          GOAL.get(row.get('goal_status'), row.get('goal_status', '-')), phase_text(row),
-                          retry_text(row.get('next_retry_at'), self.now)]
+                values = [label, runtime_text(row), goal_text(row), phase_text(row),
+                          retry_text(row.next_retry_at, self.now)]
             else:
-                values = [label, RUNTIME.get(row.get('runtime'), row.get('runtime', '-')), phase_text(row)]
+                values = [label, runtime_text(row), phase_text(row)]
             x = 4
             for n, ((_, width), value) in enumerate(zip(fields, values)):
                 c.text(y, x, value, width-1, role if n else 'text', bold=selected, selected=selected)
@@ -152,7 +153,7 @@ class Renderer:
             if not selected:
                 c.text(y,4,{'success':'●','warning':'◷','danger':'!','muted':'Ⅱ','accent':'·'}[role],1,role)
             if roomy and y+1 < end:
-                subtitle = row.get('title') or row.get('reason') or row['cwd']
+                subtitle = row.title or row.reason or row.cwd
                 c.text(y+1, 6, subtitle, inner-2, 'muted')
         if not app.rows:
             text = ('正在发现会话…' if app.busy == 'discover' else
@@ -169,19 +170,19 @@ class Renderer:
             else:
                 c.paragraph(top+2, x+2, '选择会话后，在这里查看状态与恢复判定。', sidebar-4, 3, 'muted')
         elif row and not self.compact:
-            c.text(self.h-6, 3, row.get('title') or row['label'], self.w-6, bold=True)
-            c.text(self.h-5, 3, row.get('reason') or row['cwd'], self.w-6, 'muted')
+            c.text(self.h-6, 3, row.title or row.label, self.w-6, bold=True)
+            c.text(self.h-5, 3, row.reason or row.cwd, self.w-6, 'muted')
 
     def sidebar(self, row, x, y, width, bottom):
         c = self.canvas
-        items = [(row['label'], 'heading', True), (row.get('title') or row['cwd'], 'muted', False),
+        items = [(row.label, 'heading', True), (row.title or row.cwd, 'muted', False),
                  ('', 'text', False), (phase_text(row), severity(row), True),
-                 (RUNTIME.get(row.get('runtime'), row.get('runtime','-'))+' · Goal '+GOAL.get(row.get('goal_status'),row.get('goal_status','-')), 'muted', False),
-                 ('重试 '+retry_text(row.get('next_retry_at'),self.now), 'accent', False),
+                 (runtime_text(row)+' · Goal '+goal_text(row), 'muted', False),
+                 ('重试 '+retry_text(row.next_retry_at,self.now), 'accent', False),
                  ('', 'text', False), ('恢复判定', 'muted', False),
-                 (row.get('reason') or '等待首次检查', 'text', False),
+                 (row.reason or '等待首次检查', 'text', False),
                  ('', 'text', False), ('最近失败', 'muted', False),
-                 ((row.get('last_failure') or {}).get('message') or '暂无失败记录', 'muted', False),
+                 ((row.last_failure or FailureView()).message or '暂无失败记录', 'muted', False),
                  ('', 'text', False), ('Enter 查看详情', 'accent', False)]
         for text, role, bold in items:
             lines = readable_wrap(text, width)
@@ -198,29 +199,29 @@ class Renderer:
             content.extend([('', 'text'), (title, 'heading')])
         def field(label, value, role='text'):
             content.append((label+'  '+str(value), role))
-        row = next((r for r in self.data.get('rows', []) if r['thread_id'] == app.detail), None)
+        row = next((r for r in self.data.rows if r.thread_id == app.detail), None)
         if app.mode == 'detail' and row:
-            field(row['label'], row.get('title') or '', 'heading')
+            field(row.label, row.title or '', 'heading')
             field('守护状态', phase_text(row), severity(row))
-            field('恢复判定', row.get('reason') or '等待首次检查')
+            field('恢复判定', row.reason or '等待首次检查')
             section('会话信息')
-            for label, value in [('项目目录',row['cwd']), ('Thread',row['thread_id']),
-                                 ('运行 / Goal', RUNTIME.get(row.get('runtime'), row.get('runtime','-'))+' / '+GOAL.get(row.get('goal_status'),row.get('goal_status','-'))),
-                                 ('自动守护','启用' if row.get('enabled',True) else '暂停'),
-                                 ('最近成功',activity_text(row.get('last_success_at'))),
-                                 ('下次重试',retry_text(row.get('next_retry_at'),self.now))]:
+            for label, value in [('项目目录',row.cwd), ('Thread',row.thread_id),
+                                 ('运行 / Goal', runtime_text(row)+' / '+goal_text(row)),
+                                 ('自动守护','启用' if row.enabled else '暂停'),
+                                 ('最近成功',activity_text(row.last_success_at)),
+                                 ('下次重试',retry_text(row.next_retry_at,self.now))]:
                 field(label,value,'muted')
             section('失败与恢复')
-            failure = row.get('last_failure') or {}
-            field('最近失败', failure.get('message') or '暂无失败记录', severity(row))
-            field('匹配规则', CAPACITY_LABEL if failure.get('pattern') == 'capacity' else failure.get('pattern_name') or '-')
-            field('错误码', failure.get('code') or '-', 'muted')
-            if row.get('error'): field('读取异常', row['error'], 'danger')
-            if row.get('attention'): field('提醒','恢复未确认或持续失败，请检查 Codex 状态','warning')
+            failure = row.last_failure or FailureView()
+            field('最近失败', failure.message or '暂无失败记录', severity(row))
+            field('匹配规则', CAPACITY_LABEL if failure.pattern == 'capacity' else failure.pattern_name or '-')
+            field('错误码', failure.code or '-', 'muted')
+            if row.error: field('读取异常', row.error, 'danger')
+            if row.attention: field('提醒','恢复未确认或持续失败，请检查 Codex 状态','warning')
             section('累计统计')
-            stats = row.get('lifetime_stats') or {}
-            field('失败 / 恢复提交 / 恢复完成', f"{stats.get('failures',0)} / {stats.get('attempts',0)} / {stats.get('recoveries',0)}")
-            field('观察停顿', interval_text(int(stats.get('downtime_seconds',0))), 'muted')
+            stats = row.lifetime_stats
+            field('失败 / 恢复提交 / 恢复完成', f"{stats.failures} / {stats.attempts} / {stats.recoveries}")
+            field('观察停顿', interval_text(int(stats.downtime_seconds)), 'muted')
             section('最近事件 · e 查看时间线')
         if app.mode in ('events','detail'):
             events = read_events(config.get('state_dir',''), app.detail)
@@ -228,7 +229,7 @@ class Renderer:
                 role = 'danger' if event.get('kind') in ('observation_failed','resume_unknown','service_blocked') else 'success' if event.get('kind') in ('recovery_completed','goal_completed') else 'accent'
                 line = activity_text(event.get('at'))+'  '+EVENT_NAMES.get(event.get('kind'),event.get('kind',''))
                 if app.detail is None and event.get('thread_id'):
-                    label = next((r['label'] for r in self.data.get('rows',[]) if r['thread_id']==event['thread_id']),event['thread_id'])
+                    label = next((r.label for r in self.data.rows if r.thread_id==event['thread_id']),event['thread_id'])
                     line += ' / '+label
                 content += [(line,role), ('    '+str(event.get('reason') or event.get('message') or ''),'muted')]
             if not events: content.append(('暂无事件，首次观察后会自动记录。','muted'))
@@ -290,7 +291,7 @@ class Renderer:
 
     def footer(self):
         app, c = self.app, self.canvas
-        error = app.view_error or self.data.get('error')
+        error = app.view_error or self.data.error
         c.line(self.h-3,2,self.w-4)
         if app.busy:
             c.text(self.h-4,3,'◌ 正在处理 '+app.busy+'…',self.w-6,'accent')
@@ -324,8 +325,8 @@ class Renderer:
             value = '将关闭全局观察模式，仅恢复新出现的容量故障。'
             helptext, role = 'y 确认启用    n / Esc 取消；保留 Goal、模型和预算。', 'warning'
         elif app.confirm:
-            title, message = '移除守护', app.confirm['label']
-            value,helptext,role = app.confirm['cwd'],'y 确认移除    n / Esc 取消','danger'
+            title, message = '移除守护', app.confirm.label
+            value,helptext,role = app.confirm.cwd,'y 确认移除    n / Esc 取消','danger'
         else:
             stall = app.interval_kind=='stall'
             title,message = ('停顿提醒' if stall else '检查间隔'),'输入分钟数'

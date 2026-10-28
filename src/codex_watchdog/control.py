@@ -86,9 +86,8 @@ def main():
         elif args.action == 'status':
             from .view import dashboard
             data = dashboard(path)
-            print('Watchdog: '+data['health'])
-            print(json.dumps({k: v for k, v in data.items() if k != 'config'},
-                             indent=2, ensure_ascii=False))
+            print('Watchdog: '+data.health)
+            print(json.dumps(data.to_dict(), indent=2, ensure_ascii=False))
         elif args.action == 'discover':
             print(json.dumps(discover_sessions(path), indent=2, ensure_ascii=False))
         elif args.action == 'add':

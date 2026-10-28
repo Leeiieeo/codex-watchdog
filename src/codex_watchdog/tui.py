@@ -8,6 +8,7 @@ from .registry import (add_session, discover_sessions, remove_session,
                        set_check_interval, minutes_to_seconds, set_session_enabled,
                        set_pattern_mode, set_options)
 from .view import dashboard, filter_rows, interval_text
+from .view_models import DashboardView, discovered_session
 from .patterns import PATTERNS, pattern_mode, safe_text
 from .events import read_events
 from .theme import Palette
@@ -65,7 +66,7 @@ class App:
         try:
             self.data = dashboard(self.config_path)
             self.view_error = None
-            notifications = [e for e in read_events(self.data['config']['state_dir'], limit=20)
+            notifications = [e for e in read_events(self.data.config['state_dir'], limit=20)
                              if e.get('kind') == 'notification']
             if notifications:
                 event = notifications[-1]
@@ -80,7 +81,8 @@ class App:
             elif self.last_notification_id is None:
                 self.last_notification_id = ''
         except Exception as exc:
-            self.view_error = str(exc)
+            self.view_error = safe_text(str(exc))
+            self.data = (self.data or DashboardView()).unavailable(self.view_error)
         self.last_refresh = time.monotonic()
 
     def poll(self):
@@ -90,12 +92,18 @@ class App:
         if error:
             self.toast(error)
         elif kind == 'discover':
-            self.candidates = value['sessions']
+            self.candidates = []
+            warnings = list(value['warnings'])
+            for raw in value['sessions']:
+                try:
+                    self.candidates.append(discovered_session(raw))
+                except ValueError as exc:
+                    warnings.append(safe_text(str(exc)))
             self.discovery_done = True
             self.index = 0
             self.focus = None
-            if value['warnings']:
-                self.toast(f"发现 {len(self.candidates)} 个主会话；{len(value['warnings'])} 个会话读取失败，按 r 重试")
+            if warnings:
+                self.toast(f"发现 {len(self.candidates)} 个主会话；{len(warnings)} 个会话读取失败，按 r 重试")
         elif kind == 'add':
             self.mode, self.query, self.focus = 'main', '', value['thread_id']
             self.toast('已加入守护；历史错误作为基线，正常工作继续')
@@ -119,19 +127,19 @@ class App:
     def choose_rows(self):
         if not self.data: return []
         if self.mode == 'add':
-            managed = {r['thread_id'] for r in self.data['rows']}
-            rows = [r for r in self.candidates if r['thread_id'] not in managed]
+            managed = {row.thread_id for row in self.data.rows}
+            rows = [row for row in self.candidates if row.thread_id not in managed]
         else:
-            rows = self.data['rows']
+            rows = self.data.rows
         rows = filter_rows(rows, self.query)
-        ids = [r['thread_id'] for r in rows]
+        ids = [row.thread_id for row in rows]
         if self.focus in ids: self.index = ids.index(self.focus)
         self.index = max(0, min(self.index, len(rows)-1))
-        if rows: self.focus = rows[self.index]['thread_id']
+        if rows: self.focus = rows[self.index].thread_id
         return rows
 
     def selected(self):
-        return self.rows[self.index] if self.rows else None
+        return self.rows[self.index] if 0 <= self.index < len(self.rows) else None
 
     def interrupt(self):
         now = time.monotonic()
@@ -184,7 +192,7 @@ class App:
         if self.confirm:
             if key in ('y','Y'):
                 row, self.confirm = self.confirm, None
-                self.task('remove', remove_session, self.config_path, row['thread_id'], row.get('registration_id'))
+                self.task('remove', remove_session, self.config_path, row.thread_id, row.registration_id)
             elif key in ('n','N','\x1b','\n','\r'): self.confirm = None
             return
         if self.editing_filter:
@@ -205,7 +213,7 @@ class App:
                 self.scroll = max(0, self.scroll+(8 if key == curses.KEY_NPAGE else -8))
                 return
             if key in ('m', 'n', 'b', 't', 'T') and not self.busy:
-                config = self.data['config']
+                config = self.data.config
                 if key == 'm':
                     pattern = PATTERNS[self.index]
                     modes = ['observe', 'recover', 'off'] if pattern.recoverable else ['observe', 'off']
@@ -248,7 +256,7 @@ class App:
             step = (1 if key in (curses.KEY_DOWN,'j') else -1 if key in (curses.KEY_UP,'k')
                     else 8 if key == curses.KEY_NPAGE else -8)
             self.index = max(0,min(len(self.rows)-1,self.index+step))
-            self.focus = self.rows[self.index]['thread_id'] if self.rows else None
+            self.focus = self.rows[self.index].thread_id if self.rows else None
         elif key == '/': self.editing_filter = self.mode in ('main','add')
         elif key == 'a' and self.mode == 'main':
             self.mode, self.query, self.index, self.focus = 'add','',0,None
@@ -258,19 +266,19 @@ class App:
             self.refresh()
             if self.mode == 'add': self.task('discover', discover_sessions, self.config_path)
         elif key == 'd' and self.mode == 'main' and self.selected() and not self.busy:
-            self.confirm = dict(self.selected())
+            self.confirm = self.selected()
         elif key == 'i' and self.mode == 'main' and not self.busy:
             self.interval_input, self.interval_error, self.interval_kind = '',None,'interval'
         elif key in ('p', 'P') and self.mode == 'main' and self.selected() and not self.busy:
             row = self.selected()
-            self.task('toggle', set_session_enabled, self.config_path, row['thread_id'],
-                      not row.get('enabled', True), row.get('registration_id'))
+            self.task('toggle', set_session_enabled, self.config_path, row.thread_id,
+                      not row.enabled, row.registration_id)
         elif key in ('\n','\r',curses.KEY_ENTER) and self.mode in ('main','add'):
             row = self.selected()
             if row and self.mode == 'add':
-                self.task('add', add_session, self.config_path, row['thread_id'])
+                self.task('add', add_session, self.config_path, row.thread_id)
             elif row and self.mode == 'main':
-                self.detail, self.mode, self.scroll = row['thread_id'], 'detail', 0
+                self.detail, self.mode, self.scroll = row.thread_id, 'detail', 0
         elif key in ('l', 'e', 'g', 'G', '?') and self.mode == 'main':
             self.mode = {'l':'logs','e':'events','g':'patterns','G':'patterns','?':'help'}[key]
             self.detail, self.scroll, self.index = None, 0, 0

@@ -2,6 +2,7 @@
 import curses
 
 from .view import cells, fit, wrap_text
+from .view_models import GoalPresence, Observation, SessionView
 
 
 def readable_wrap(value, width):
@@ -28,26 +29,48 @@ PHASE = {'baseline':'建立基线', 'running':'正常工作', 'healthy':'正常'
 HEALTH = {'running':'运行中', 'healthy':'正常', 'warming':'建立连接', 'empty':'暂无会话',
           'stopped':'已停止', 'stale':'检查过期', 'error':'异常', 'degraded':'部分异常',
           'starting':'启动中', 'restarting':'重启中', 'blocked':'需处理', 'unknown':'待确认'}
-RUNTIME = {'active':'运行中', 'idle':'空闲', 'systemError':'失败', 'notLoaded':'未加载'}
+RUNTIME = {'active':'运行中', 'idle':'空闲', 'systemError':'失败', 'notLoaded':'未加载',
+           'unknown':'待确认'}
 GOAL = {'active':'执行中', 'paused':'已暂停', 'blocked':'已阻塞', 'complete':'已完成',
         'budget_limited':'预算耗尽', 'usage_limited':'用量限制'}
 
 
-def phase_text(row):
-    if not row.get('enabled', True):
+def runtime_text(row: SessionView):
+    status = row.runtime or 'unknown'
+    return RUNTIME.get(status, status)
+
+
+def goal_text(row: SessionView):
+    if row.observation == Observation.FAILED:
+        return '读取失败'
+    goal = row.goal
+    if goal.presence == GoalPresence.UNKNOWN:
+        return '-'
+    result = '未设置' if goal.presence == GoalPresence.ABSENT else GOAL.get(goal.status, goal.status)
+    return result+'（过期）' if row.observation == Observation.STALE else result
+
+
+def phase_text(row: SessionView):
+    if row.observation == Observation.FAILED:
+        return '读取异常'
+    if row.observation == Observation.STALE:
+        return '数据过期'
+    if not row.enabled:
         return '守护已暂停'
-    result = PHASE.get(row.get('phase'), row.get('phase', '等待首次检查'))
-    return result+' · 需关注' if row.get('attention') else result
+    result = PHASE.get(row.phase, row.phase)
+    return result+' · 需关注' if row.attention else result
 
 
-def severity(row):
-    if row.get('error') or row.get('attention') or row.get('phase') in ('suspended', 'resume_outcome_unknown'):
+def severity(row: SessionView):
+    if row.error or row.attention or row.phase in ('suspended', 'resume_outcome_unknown'):
         return 'danger'
-    if not row.get('enabled', True) or row.get('phase') == 'guard_paused':
-        return 'muted'
-    if row.get('phase') in ('backoff', 'observed_failure', 'awaiting_new_turn', 'unavailable', 'paused'):
+    if row.observation == Observation.STALE:
         return 'warning'
-    if row.get('phase') in ('running', 'healthy'):
+    if not row.enabled or row.phase == 'guard_paused':
+        return 'muted'
+    if row.phase in ('backoff', 'observed_failure', 'awaiting_new_turn', 'unavailable', 'paused'):
+        return 'warning'
+    if row.phase in ('running', 'healthy'):
         return 'success'
     return 'accent'
 

@@ -1,4 +1,5 @@
 import curses
+from dataclasses import replace
 import tempfile
 import unittest
 import os
@@ -10,6 +11,7 @@ from codex_watchdog.view import cells
 from codex_watchdog.theme import Palette, resolve_theme
 from codex_watchdog.setup import Setup
 from codex_watchdog.presentation import readable_wrap
+from codex_watchdog.view_models import DashboardView, session_view
 
 
 class Buffer:
@@ -57,10 +59,14 @@ class PresentationTests(unittest.TestCase):
              'phase':'backoff','reason':'已匹配容量故障，等待退避到期后复核'},
             {'thread_id':'three','label':'论文管理','title':'同步论文','cwd':'/projects/papers',
              'runtime':'idle','goal_status':'paused','phase':'guard_paused','enabled':False}]
-        self.app.data = {'health':'running','service_health':'running','monitor_health':'healthy',
-                         'successful_targets':3,'rows':self.rows,'age':10,'last_success_age':10,
-                         'next_check_at':None,'check_interval_seconds':300,
-                         'config':{'state_dir':self.tmp.name}}
+        self.rows = [session_view(row, row) for row in self.rows]
+        self.app.data = DashboardView(health='running', service_health='running', monitor_health='healthy',
+                                     successful_targets=3, rows=tuple(self.rows), age=10, last_success_age=10,
+                                     config={'state_dir':self.tmp.name})
+
+    def update_row(self, index, **changes):
+        self.rows[index] = replace(self.rows[index], **changes)
+        self.app.data = replace(self.app.data, rows=tuple(self.rows))
 
     def render(self, height=30, width=130):
         screen = Buffer(height, width)
@@ -73,7 +79,7 @@ class PresentationTests(unittest.TestCase):
         for value in ('守护服务','监控连接','需要关注','选中会话',
                       '已匹配容量故障，等待退避到期后复核','Goal 已阻塞','重试'):
             self.assertIn(value,screen.text)
-        self.assertEqual(self.app.selected()['thread_id'],'two')
+        self.assertEqual(self.app.selected().thread_id,'two')
 
     def test_compact_layout_keeps_selection_visible_when_scrolling(self):
         self.app.index = 2
@@ -84,7 +90,7 @@ class PresentationTests(unittest.TestCase):
         self.assertIn('Ctrl+C × 2',screen.text)
 
     def test_every_page_survives_resize_and_long_unicode_content(self):
-        self.rows[0]['reason'] = '原因很长 '*100
+        self.update_row(0, reason='原因很长 '*100)
         self.app.detail = 'one'
         self.app.diagnostic = {'checks':[{'name':'连接','level':'error','message':'长错误 '*100}]}
         for height,width in ((18,70),(24,80),(30,130),(45,180)):
@@ -98,13 +104,42 @@ class PresentationTests(unittest.TestCase):
                     self.app.key('j')
                     self.render(height,width)
 
+    def test_optional_session_statuses_render_in_lists_sidebar_and_details(self):
+        base = {'thread_id':'optional', 'label':'Optional status', 'cwd':'/project',
+                'phase':'baseline'}
+        cases = [
+            ({}, '待确认', '-'),
+            ({'runtime':'active'}, '运行中', '-'),
+            ({'runtime':'active', 'goal_status':None}, '运行中', '未设置'),
+            ({'runtime':None, 'goal_status':None}, '待确认', '未设置'),
+            ({'runtime':'', 'goal_status':''}, '待确认', '-'),
+            ({'runtime':'new-runtime', 'goal_status':'new-goal'}, 'new-runtime', 'new-goal'),
+        ]
+        for statuses, runtime_label, goal_label in cases:
+            row = session_view(base, {**base, **statuses})
+            for mode in ('main', 'add', 'detail'):
+                self.app.data = replace(self.app.data, rows=() if mode == 'add' else (row,))
+                self.app.candidates = [row]
+                self.app.detail = row.thread_id
+                self.app.mode = mode
+                self.app.index = self.app.scroll = 0
+                self.app.focus = None
+                for height, width in ((18, 70), (24, 80), (30, 130), (45, 180)):
+                    with self.subTest(statuses=statuses, mode=mode, height=height, width=width):
+                        screen = self.render(height, width)
+                        self.assertNotIn('None', screen.text)
+                        if height == 45:
+                            expected = (runtime_label+' / '+goal_label if mode == 'detail'
+                                        else runtime_label+' · Goal '+goal_label)
+                            self.assertIn(expected, screen.text)
+
     def test_dialog_overlays_do_not_change_selection_and_fit_small_terminal(self):
         self.app.index = 1
-        self.app.confirm = dict(self.rows[1])
+        self.app.confirm = self.rows[1]
         screen = self.render(18,70)
         self.assertIn('移除守护',screen.text)
         self.assertIn('y 确认移除',screen.text)
-        self.assertEqual(self.app.selected()['thread_id'],'two')
+        self.assertEqual(self.app.selected().thread_id,'two')
         self.app.confirm = None
         self.app.interval_input = '0.5'
         screen = self.render(18,70)
@@ -141,7 +176,7 @@ class PresentationTests(unittest.TestCase):
         self.assertNotEqual(lines[0][-1],'t')
 
     def test_attention_card_handles_real_error_messages(self):
-        self.rows[0].update(error='daemon disconnected',phase='suspended')
+        self.update_row(0, error='daemon disconnected', phase='suspended')
         self.assertIn('1 个会话',self.render().text)
 
     def test_rule_hints_use_a_different_letter_from_guard_toggle(self):

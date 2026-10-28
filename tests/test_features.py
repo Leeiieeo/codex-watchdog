@@ -196,10 +196,10 @@ class Features(unittest.TestCase):
         root=Path(self.config['state_dir'])
         (root/'status.json').write_text(json.dumps(status))
         data=dashboard(self.path,now=101)
-        self.assertEqual(data['service_health'],'running')
-        self.assertEqual(data['monitor_health'],'error')
-        self.assertEqual(data['successful_targets'],0)
-        self.assertEqual(data['last_success_age'],21)
+        self.assertEqual(data.service_health,'running')
+        self.assertEqual(data.monitor_health,'error')
+        self.assertEqual(data.successful_targets,0)
+        self.assertEqual(data.last_success_age,21)
 
     def test_notifications_are_disabled_by_default_and_rate_limited(self):
         notifier=Notifier(self.config['state_dir'])

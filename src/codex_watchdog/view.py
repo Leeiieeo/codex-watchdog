@@ -10,6 +10,9 @@ import unicodedata
 
 from .registry import load_config
 from .events import read_metrics
+from .patterns import safe_text
+from .view_models import (DashboardView, Observation, ViewDataError, number_value,
+                          object_value, session_view, text_value)
 
 
 def cells(text):
@@ -61,91 +64,92 @@ def interval_text(seconds):
     return f'{seconds//60} 分 {seconds%60} 秒'
 
 
+def read_status(path):
+    """An absent snapshot is pending; an unreadable snapshot is an error."""
+    try:
+        return object_value(json.loads(path.read_text()), path.name), None
+    except FileNotFoundError:
+        return {}, None
+    except (OSError, ValueError, UnicodeError) as exc:
+        return {}, safe_text(str(exc))
+
+
+def process_alive(status):
+    try:
+        pid = number_value(status.get('pid'), 'pid', 0, integer=True)
+        if status.get('host') == os.uname().nodename and pid > 0:
+            os.kill(pid, 0)
+            return True
+    except (OSError, ValueError, OverflowError):
+        pass
+    return False
+
+
 def dashboard(config_path, now=None):
     now = time.time() if now is None else now
     config = load_config(config_path)
     state_dir = Path(config['state_dir'])
-    error, status = None, {}
-    try:
-        status = json.loads((state_dir/'status.json').read_text())
-        if (not isinstance(status, dict) or not isinstance(status.get('targets'), dict)
-                or not all(isinstance(row, dict) for row in status['targets'].values())):
-            raise ValueError('invalid status file')
-    except (OSError, ValueError) as exc:
-        error = str(exc)
-        status = {}
-    checked = status.get('checked_at')
-    age = max(0, now-checked) if isinstance(checked, (int,float)) else None
+    status, error = read_status(state_dir/'status.json')
     interval = config['check_interval_seconds']
-    next_check = (status.get('next_check_at') if status.get('check_interval_seconds') == interval else None)
-    if not isinstance(next_check, (int, float)):
-        next_check = checked+interval if isinstance(checked,(int,float)) else None
-    alive = False
+    checked, next_check, pid, targets = None, None, None, {}
     try:
-        if status.get('host') == os.uname().nodename and int(status.get('pid', 0)) > 0:
-            os.kill(int(status['pid']), 0)
-            alive = True
-    except (OSError, ValueError, TypeError):
-        pass
-    health = ('stopped' if (state_dir/'STOP').exists() or not alive else
+        targets = object_value(status.get('targets', {}), 'status.targets')
+        checked = number_value(status.get('checked_at'), 'checked_at')
+        pid = number_value(status.get('pid'), 'pid', integer=True)
+        if status.get('check_interval_seconds') == interval:
+            next_check = number_value(status.get('next_check_at'), 'next_check_at')
+        error = error or text_value(status.get('error'), 'status.error')
+    except ViewDataError as exc:
+        error = str(exc)
+    if next_check is None and checked is not None:
+        next_check = checked+interval
+    age = max(0, now-checked) if checked is not None else None
+    alive = process_alive(status)
+    stopped = (state_dir/'STOP').exists()
+    health = ('stopped' if stopped or not alive else
               'stale' if next_check is None or now > next_check+20 else
-              'error' if error or status.get('error') else 'running')
+              'error' if error else 'running')
     rows = []
     metrics = read_metrics(state_dir)
     for target in config['targets']:
-        observed = status.get('targets', {}).get(target['thread_id'], {})
-        if observed.get('registration_id', target.get('registration_id')) != target.get('registration_id'):
-            observed = {}
-        if observed.get('guard_revision') != target.get('guard_revision'):
-            observed = {}
-        row = {**observed, **target}
-        row.setdefault('runtime', 'unknown')
-        row.setdefault('goal_status', '-')
-        row.setdefault('phase', 'pending_observation')
-        row.setdefault('attempts', 0)
-        row['lifetime_stats'] = metrics.get(target['thread_id'], {})
-        rows.append(row)
-    success = sum(not row.get('error') and row.get('phase') != 'pending_observation' for row in rows)
-    monitor_health = ('empty' if not rows else 'error' if success == 0 and any(row.get('error') for row in rows)
-                      else 'degraded' if any(row.get('error') for row in rows)
+        observed = targets.get(target['thread_id'], {})
+        rows.append(session_view(target, observed, metrics.get(target['thread_id'], {}),
+                                 stale=health in ('stopped', 'stale'), error=error))
+    success = sum(row.observation == Observation.CURRENT for row in rows)
+    failures = any(row.observation == Observation.FAILED for row in rows)
+    monitor_health = ('empty' if not rows else 'error' if success == 0 and failures
+                      else 'degraded' if failures
                       else 'warming' if success < len(rows) else 'healthy')
     if health in ('stopped', 'stale'):
         monitor_health = health
     elif monitor_health in ('error', 'degraded'):
         health = monitor_health
+    service, service_error = read_status(state_dir/'service-status.json')
+    service_alive = process_alive(service)
     try:
-        service = json.loads((state_dir/'service-status.json').read_text())
-    except (OSError, ValueError):
-        service = {}
-    if not isinstance(service, dict):
-        service = {}
-    service_alive = False
-    try:
-        if service.get('host') == os.uname().nodename and int(service.get('pid', 0)) > 0:
-            os.kill(int(service['pid']), 0)
-            service_alive = True
-    except (OSError, ValueError, TypeError):
-        pass
-    service_health = ('running' if alive else service.get('phase', 'starting')) if service_alive else ('running' if alive else 'stopped')
-    if service_alive and service.get('phase') in ('blocked', 'restarting'):
-        service_health = service['phase']
-    if (state_dir/'STOP').exists():
+        service_phase = text_value(service.get('phase'), 'service.phase') or 'starting'
+    except ViewDataError as exc:
+        service_phase, service_error = 'unknown', str(exc)
+    service_health = ('running' if alive else service_phase) if service_alive else ('running' if alive else 'stopped')
+    if service_alive and service_phase in ('blocked', 'restarting'):
+        service_health = service_phase
+    if stopped:
         service_health = 'stopped'
-    succeeded = [r.get('last_success_at') for r in rows if isinstance(r.get('last_success_at'), (int, float))]
+    succeeded = [row.last_success_at for row in rows if row.last_success_at is not None]
     last_success = max(succeeded) if succeeded else None
-    return {'config': config, 'rows': rows, 'health': health, 'age': age,
-            'pid': status.get('pid'), 'error': error or status.get('error'),
-            'check_interval_seconds':interval,'next_check_at':next_check,
-            'service_health': service_health, 'service': service,
-            'monitor_health': monitor_health, 'successful_targets': success,
-            'last_success_at': last_success,
-            'last_success_age': max(0, now-last_success) if isinstance(last_success,(int,float)) else None}
+    return DashboardView(config=config, rows=tuple(rows), health=health, age=age,
+                         pid=pid, error=safe_text(error or service_error) if error or service_error else None,
+                         check_interval_seconds=interval, next_check_at=next_check,
+                         service_health=service_health, service=service,
+                         monitor_health=monitor_health, successful_targets=success,
+                         last_success_at=last_success,
+                         last_success_age=max(0, now-last_success) if last_success is not None else None)
 
 
 def filter_rows(rows, query):
     query = query.casefold().strip()
-    return [r for r in rows if query in ' '.join(str(r.get(k, '')) for k in
-            ('label','title','cwd','runtime','goal_status','phase')).casefold()]
+    return [row for row in rows if query in ' '.join(
+        (row.label, row.title, row.cwd, row.runtime or '', row.goal.status or '', row.phase)).casefold()]
 
 
 def log_lines(config, thread_id=None, service=False):
